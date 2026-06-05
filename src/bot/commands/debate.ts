@@ -1,4 +1,4 @@
-import type { ChatInputCommandInteraction } from "discord.js"
+import type { ChatInputCommandInteraction, ButtonInteraction } from "discord.js"
 import {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -31,12 +31,13 @@ function parseHoldings(input: string): Array<{ ticker: string; shares: number; a
   }).filter((h) => !isNaN(h.shares) && !isNaN(h.averageCost))
 }
 
-export async function handleDebate(interaction: ChatInputCommandInteraction) {
-  const ticker = interaction.options.getString("ticker", true).toUpperCase()
-  const capital = interaction.options.getNumber("capital")
-  const holdingsStr = interaction.options.getString("holdings")
-
-  await interaction.deferReply()
+async function debateCore(
+  reply: { user: { id: string }; deferReply(): Promise<unknown>; editReply(content: unknown): Promise<unknown> },
+  ticker: string,
+  capital?: number | null,
+  holdingsStr?: string | null,
+) {
+  await reply.deferReply()
 
   let progressLines: string[] = []
   let lastEdit = 0
@@ -62,7 +63,7 @@ export async function handleDebate(interaction: ChatInputCommandInteraction) {
         cashRatio: capital > 0 ? (capital - totalHoldingsValue) / capital : 0.2,
       }
     } else {
-      const saved = await getUserPortfolio(interaction.user.id)
+      const saved = await getUserPortfolio(reply.user.id)
       if (saved) {
         const totalHoldingsValue = saved.holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
         portfolio = {
@@ -85,16 +86,14 @@ export async function handleDebate(interaction: ChatInputCommandInteraction) {
           const now = Date.now()
           if (now - lastEdit > 1000) {
             lastEdit = now
-            interaction.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
+            reply.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
           }
         },
       }
     )
 
-    // Flush final progress
-    await interaction.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
+    await reply.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
 
-    // Final result — try embed, fallback to text
     try {
       const { embeds } = formatResultEmbed(ticker, result)
 
@@ -104,16 +103,15 @@ export async function handleDebate(interaction: ChatInputCommandInteraction) {
         })
       }
 
-      await interaction.editReply({ content: null, embeds })
+      await reply.editReply({ content: null, embeds })
     } catch {
-      // Embed too large or formatting failed — fallback to plain text
       const summary = [
         `**${ticker} — ${result.judgment.action}** (${(result.judgment.conviction * 100).toFixed(0)}%)`,
         `Evidence: ${result.judgment.evidenceStrength} | Disagreement: ${result.judgment.disagreementLevel}`,
         `\n${result.judgment.rationale.slice(0, 1500)}`,
         `\n⏱ ${(result.durationMs / 1000).toFixed(1)}s | 🔢 ${result.totalTokensUsed.toLocaleString()} tokens`,
       ].join("\n")
-      await interaction.editReply({ content: summary, embeds: [] })
+      await reply.editReply({ content: summary, embeds: [] })
     }
   } catch (err) {
     const errorEmbed = new EmbedBuilder()
@@ -122,6 +120,17 @@ export async function handleDebate(interaction: ChatInputCommandInteraction) {
       .setDescription(err instanceof Error ? err.message : "Unknown error")
       .setFooter({ text: "Check API keys and try again" })
 
-    await interaction.editReply({ content: null, embeds: [errorEmbed] }).catch(() => {})
+    await reply.editReply({ content: null, embeds: [errorEmbed] }).catch(() => {})
   }
+}
+
+export async function handleDebate(interaction: ChatInputCommandInteraction) {
+  const ticker = interaction.options.getString("ticker", true).toUpperCase()
+  const capital = interaction.options.getNumber("capital")
+  const holdingsStr = interaction.options.getString("holdings")
+  await debateCore(interaction, ticker, capital, holdingsStr)
+}
+
+export async function handleDebateFromButton(interaction: ButtonInteraction, ticker: string) {
+  await debateCore(interaction, ticker.toUpperCase(), null, null)
 }

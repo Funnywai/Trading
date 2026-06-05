@@ -6,8 +6,9 @@ import {
   REST,
   Routes,
 } from "discord.js"
-import { debateCommand, handleDebate } from "./commands/debate"
+import { debateCommand, handleDebate, handleDebateFromButton } from "./commands/debate"
 import { portfolioCommand, handlePortfolio } from "./commands/portfolio"
+import { searchCommand, handleSearch } from "./commands/search"
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID
@@ -25,6 +26,7 @@ const client = new Client({
 const commands = [
   debateCommand.toJSON(),
   portfolioCommand.toJSON(),
+  searchCommand.toJSON(),
 ]
 
 // Register slash commands on startup
@@ -41,12 +43,22 @@ const rest = new REST({ version: "10" }).setToken(TOKEN)
 
 // Handle interactions
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith("search_debate:")) {
+      const ticker = interaction.customId.split(":")[1]
+      await handleDebateFromButton(interaction, ticker)
+    }
+    return
+  }
+
   if (!interaction.isChatInputCommand()) return
 
   if (interaction.commandName === "debate") {
     await handleDebate(interaction)
   } else if (interaction.commandName === "portfolio") {
     await handlePortfolio(interaction)
+  } else if (interaction.commandName === "search") {
+    await handleSearch(interaction)
   }
 })
 

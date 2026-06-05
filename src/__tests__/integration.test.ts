@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { mainThesisOutputSchema } from "@/agents/main/schema"
-import { newsAgentOutputSchema } from "@/agents/news/schema"
-import { fundamentalAgentOutputSchema } from "@/agents/fundamental/schema"
+import { newsPassSchema, fundamentalPassSchema } from "@/agents/analyst-pass/schema"
 import { riskAgentOutputSchema } from "@/agents/risk/schema"
 import { mainJudgmentInputSchema } from "@/agents/main/schema"
 import { debateResultSchema } from "@/schemas"
@@ -46,8 +45,8 @@ describe("Debate Pipeline Integration", () => {
       valuationSummary: "Overvalued relative to peers",
     }
 
-    expect(newsAgentOutputSchema.safeParse(newsOutput).success).toBe(true)
-    expect(fundamentalAgentOutputSchema.safeParse(fundamentalOutput).success).toBe(true)
+    expect(newsPassSchema.safeParse(newsOutput).success).toBe(true)
+    expect(fundamentalPassSchema.safeParse(fundamentalOutput).success).toBe(true)
   })
 
   it("risk assessment is valid for judgment input", () => {
