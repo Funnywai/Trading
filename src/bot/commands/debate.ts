@@ -1,0 +1,127 @@
+import type { ChatInputCommandInteraction } from "discord.js"
+import {
+  SlashCommandBuilder,
+  EmbedBuilder,
+} from "discord.js"
+import { DeepseekAdapter } from "@/adapters/llm/deepseek"
+import { FinnhubAdapter } from "@/adapters/news/finnhub"
+import { yahooFinanceAdapter, YahooFinanceAdapter } from "@/adapters/market-data/yahoo-finance"
+import { runDebate } from "@/agents/debate/orchestrator"
+import { formatProgressEmbed, formatResultEmbed } from "../formatter"
+import { getUserPortfolio } from "@/db/portfolio-repo"
+
+export const debateCommand = new SlashCommandBuilder()
+  .setName("debate")
+  .setDescription("Run multi-agent debate analysis on a US stock")
+  .addStringOption((option) =>
+    option.setName("ticker").setDescription("Stock ticker (e.g. AAPL)").setRequired(true)
+  )
+  .addNumberOption((option) =>
+    option.setName("capital").setDescription("Portfolio total capital (for risk assessment)")
+  )
+  .addStringOption((option) =>
+    option.setName("holdings")
+      .setDescription("Holdings: TICKER:SHARES:COST,TICKER:SHARES:COST (e.g. AAPL:50:180,MSFT:30:350)")
+  )
+
+function parseHoldings(input: string): Array<{ ticker: string; shares: number; averageCost: number }> {
+  return input.split(",").map((h) => {
+    const [ticker, shares, cost] = h.trim().split(":")
+    return { ticker: ticker.toUpperCase(), shares: parseFloat(shares), averageCost: parseFloat(cost) }
+  }).filter((h) => !isNaN(h.shares) && !isNaN(h.averageCost))
+}
+
+export async function handleDebate(interaction: ChatInputCommandInteraction) {
+  const ticker = interaction.options.getString("ticker", true).toUpperCase()
+  const capital = interaction.options.getNumber("capital")
+  const holdingsStr = interaction.options.getString("holdings")
+
+  await interaction.deferReply()
+
+  let progressLines: string[] = []
+  let lastEdit = 0
+
+  try {
+    const llm = new DeepseekAdapter()
+    const newsAdapter = new FinnhubAdapter()
+    const fundamentalAdapter = yahooFinanceAdapter
+    const marketData = new YahooFinanceAdapter()
+
+    let portfolio: {
+      totalValue: number
+      holdings: Array<{ ticker: string; shares: number; averageCost: number }>
+      cashRatio?: number
+    } | undefined
+
+    if (capital && capital > 0) {
+      const holdings = holdingsStr ? parseHoldings(holdingsStr) : []
+      const totalHoldingsValue = holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
+      portfolio = {
+        totalValue: capital,
+        holdings,
+        cashRatio: capital > 0 ? (capital - totalHoldingsValue) / capital : 0.2,
+      }
+    } else {
+      const saved = await getUserPortfolio(interaction.user.id)
+      if (saved) {
+        const totalHoldingsValue = saved.holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
+        portfolio = {
+          totalValue: saved.capital,
+          holdings: saved.holdings,
+          cashRatio: saved.capital > 0 ? (saved.capital - totalHoldingsValue) / saved.capital : 0.2,
+        }
+      }
+    }
+
+    const result = await runDebate(
+      llm, newsAdapter, fundamentalAdapter, marketData, ticker,
+      {
+        portfolio,
+        onProgress: (event) => {
+          const line = `[${event.phase.toUpperCase()}] ${event.detail}`
+          progressLines.push(line)
+          if (progressLines.length > 15) progressLines = progressLines.slice(-15)
+
+          const now = Date.now()
+          if (now - lastEdit > 1000) {
+            lastEdit = now
+            interaction.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
+          }
+        },
+      }
+    )
+
+    // Flush final progress
+    await interaction.editReply(formatProgressEmbed(ticker, progressLines)).catch(() => {})
+
+    // Final result — try embed, fallback to text
+    try {
+      const { embeds } = formatResultEmbed(ticker, result)
+
+      if (result.riskAssessment) {
+        embeds[0].setFooter({
+          text: `Risk: ${result.riskAssessment.riskScore}/100 | ${(result.durationMs / 1000).toFixed(1)}s | ${result.totalTokensUsed.toLocaleString()} tokens`,
+        })
+      }
+
+      await interaction.editReply({ content: null, embeds })
+    } catch {
+      // Embed too large or formatting failed — fallback to plain text
+      const summary = [
+        `**${ticker} — ${result.judgment.action}** (${(result.judgment.conviction * 100).toFixed(0)}%)`,
+        `Evidence: ${result.judgment.evidenceStrength} | Disagreement: ${result.judgment.disagreementLevel}`,
+        `\n${result.judgment.rationale.slice(0, 1500)}`,
+        `\n⏱ ${(result.durationMs / 1000).toFixed(1)}s | 🔢 ${result.totalTokensUsed.toLocaleString()} tokens`,
+      ].join("\n")
+      await interaction.editReply({ content: summary, embeds: [] })
+    }
+  } catch (err) {
+    const errorEmbed = new EmbedBuilder()
+      .setTitle(`❌ Analysis Failed — ${ticker}`)
+      .setColor(0xef4444)
+      .setDescription(err instanceof Error ? err.message : "Unknown error")
+      .setFooter({ text: "Check API keys and try again" })
+
+    await interaction.editReply({ content: null, embeds: [errorEmbed] }).catch(() => {})
+  }
+}

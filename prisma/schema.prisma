@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Portfolio {
+  id            String   @id @default(cuid())
+  discordUserId String   @unique
+  name          String
+  cashBalance   Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  holdings      Holding[]
+}
+
+model Holding {
+  id          String    @id @default(cuid())
+  portfolioId String
+  ticker      String
+  shares      Float
+  averageCost Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+}
+
+model TradeRecord {
+  id             String   @id @default(cuid())
+  ticker         String
+  side           String
+  action         String
+  entryPrice     Float?
+  stopLoss       Float?
+  targetPrice    Float?
+  positionSize   Float?
+  status         String   @default("PROPOSED")
+  approvalNotes  String?
+  executedAt     DateTime?
+  createdAt      DateTime @default(now())
+}
+
+model RunHistory {
+  id               String   @id @default(cuid())
+  ticker           String
+  thesis           String
+  researchMemo     String?
+  tradeProposal    String?
+  approvalDecision String?
+  executionResult  String?
+  alerts           String?
+  notes            String?
+  totalTokens      Int      @default(0)
+  durationMs       Int      @default(0)
+  createdAt        DateTime @default(now())
+}
+
+model AlertLog {
+  id        String   @id @default(cuid())
+  runId     String
+  level     String
+  category  String
+  message   String
+  dismissed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
