@@ -616,6 +616,7 @@ export async function runDebate(
     thesis: finalState.thesis!, rounds: [{ round: 1, thesis: finalState.thesis!, arguments: finalState.analystReports }],
     riskAssessment: finalState.riskAssessment, judgment: finalState.judgment,
     researchMemo: finalState.researchMemo ?? undefined,
+    tradeProposal: finalState.tradeProposal ?? undefined,
     approvalDecision: finalState.approvalDecision ?? undefined,
     totalTokensUsed: finalState.totalTokensUsed, durationMs: Date.now() - startTime,
   }

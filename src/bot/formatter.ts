@@ -36,6 +36,7 @@ export function formatResultEmbed(ticker: string, result: DebateResult): { embed
     const fields = []
     if (tp.side !== "NONE") fields.push(`方向: ${tp.side}`)
     if (tp.entryBand) fields.push(`進場: $${tp.entryBand.lower}–$${tp.entryBand.upper}`)
+    if (tp.targetPrice) fields.push(`止盈: $${tp.targetPrice}`)
     if (tp.stopLoss) fields.push(`止損: $${tp.stopLoss}`)
     if (tp.maxPositionSizePct) fields.push(`倉位: ${tp.maxPositionSizePct}%`)
     if (fields.length > 0) mainEmbed.addFields({ name: "交易提案", value: fields.join(" | "), inline: true })
@@ -86,7 +87,7 @@ export function formatResultEmbed(ticker: string, result: DebateResult): { embed
       .setDescription(enforcements.slice(0, 5).join("\n")))
   }
 
-  embeds.push(new EmbedBuilder()
+  const detailEmbed = new EmbedBuilder()
     .setTitle("📋 決策細節")
     .setColor(0x6b7280)
     .addFields(
@@ -94,7 +95,127 @@ export function formatResultEmbed(ticker: string, result: DebateResult): { embed
       { name: "分歧程度", value: result.judgment.disagreementLevel, inline: true },
       { name: "下次審查", value: result.judgment.nextReviewTrigger.slice(0, 256) || "無資料", inline: true },
     )
-    .setFooter({ text: result.judgment.invalidationConditions.slice(0, 3).join(" | ") || "無否定條件" }))
 
+  const priceFields: string[] = []
+  if (result.judgment.entryPrice) priceFields.push(`入場: $${result.judgment.entryPrice}`)
+  if (result.judgment.targetPrice) priceFields.push(`止盈: $${result.judgment.targetPrice}`)
+  if (result.judgment.stopLoss) priceFields.push(`止損: $${result.judgment.stopLoss}`)
+  if (priceFields.length > 0) {
+    detailEmbed.addFields({ name: "價格區間", value: priceFields.join("  |  ") })
+  }
+
+  detailEmbed.setFooter({ text: result.judgment.invalidationConditions.slice(0, 3).join(" | ") || "無否定條件" })
+
+  embeds.push(detailEmbed)
+
+  return { embeds }
+}
+
+export function formatReviewResultEmbed(
+  displayName: string,
+  results: Array<{
+    ticker: string
+    shares: number
+    averageCost: number
+    success: boolean
+    currentPrice: number
+    action: string
+    conviction: number
+    evidenceStrength: string
+    rationale: string
+    riskScore: number | null
+    entryPrice?: number
+    targetPrice?: number
+    stopLoss?: number
+    error?: string
+    warnings?: string[]
+    positionSizePercent?: number
+    suggestedShares?: number
+  }>,
+  totalDurationMs: number,
+): { embeds: EmbedBuilder[] } {
+  const embeds: EmbedBuilder[] = []
+
+  let actionAdd = 0
+  let actionHold = 0
+  let actionObserve = 0
+  let actionReduce = 0
+  let actionFail = 0
+
+  const mainEmbed = new EmbedBuilder()
+    .setTitle(`📊 投資組合審查 — ${displayName}`)
+    .setColor(0x3b82f6)
+
+  for (const r of results) {
+    const actionEmoji = r.action === "ADD_SMALL" ? "🟢"
+      : r.action === "EXIT" || r.action === "REDUCE" ? "🔴"
+      : r.action === "HOLD" ? "🔵"
+      : r.action === "FAILED" ? "❌"
+      : "🟡"
+
+    if (r.action === "ADD_SMALL") actionAdd++
+    else if (r.action === "EXIT" || r.action === "REDUCE") actionReduce++
+    else if (r.action === "HOLD") actionHold++
+    else if (r.action === "FAILED") actionFail++
+    else actionObserve++
+
+    if (r.success) {
+      const pnl = r.currentPrice > 0 ? (r.currentPrice - r.averageCost) * r.shares : 0
+      const pnlPct = r.averageCost > 0 ? ((r.currentPrice - r.averageCost) / r.averageCost) * 100 : 0
+      const pnlSign = pnl >= 0 ? "+" : ""
+      const parts: string[] = []
+      parts.push(`持有: ${r.shares} 股 @ $${r.averageCost.toFixed(2)}`)
+      if (r.currentPrice > 0) parts.push(`現價: $${r.currentPrice.toFixed(2)}  (${pnlSign}$${pnl.toFixed(0)}, ${pnlSign}${pnlPct.toFixed(2)}%)`)
+      parts.push(`證據力: ${r.evidenceStrength}`)
+
+      const priceParts: string[] = []
+      if (r.entryPrice) priceParts.push(`入場: $${r.entryPrice}`)
+      if (r.targetPrice) priceParts.push(`止盈: $${r.targetPrice}`)
+      if (r.stopLoss) priceParts.push(`止損: $${r.stopLoss}`)
+      if (r.positionSizePercent !== undefined && r.suggestedShares !== undefined && r.suggestedShares > 0) {
+        priceParts.push(`倉位: ${r.positionSizePercent}% ≈ ${r.suggestedShares} 股`)
+      }
+
+      const valueLines = [
+        `**${r.action}** (${(r.conviction * 100).toFixed(0)}%)`,
+        parts.join(" | "),
+        r.rationale.slice(0, 200),
+      ]
+      if (priceParts.length > 0) valueLines.push(priceParts.join(" | "))
+      if (r.riskScore !== null) valueLines.push(`Risk: ${r.riskScore}/100`)
+      if (r.warnings && r.warnings.length > 0) {
+        const llmWarnings = r.warnings.filter((w) => !w.startsWith("enforce:"))
+        if (llmWarnings.length > 0) valueLines.push(`⚠ ${llmWarnings.join(" | ")}`)
+      }
+
+      mainEmbed.addFields({
+        name: `${actionEmoji} ${r.ticker}`,
+        value: valueLines.join("\n"),
+      })
+    } else {
+      mainEmbed.addFields({
+        name: `❌ ${r.ticker} — FAILED`,
+        value: r.error ?? "Unknown error",
+      })
+    }
+  }
+
+  const summaryParts: string[] = []
+  summaryParts.push(`✅ 增持: ${actionAdd}`)
+  summaryParts.push(`🔵 持有: ${actionHold}`)
+  summaryParts.push(`🟡 觀察: ${actionObserve}`)
+  summaryParts.push(`❌ 失敗: ${actionFail}`)
+  if (actionReduce > 0) summaryParts.push(`🔴 減持: ${actionReduce}`)
+
+  mainEmbed.addFields({
+    name: "📋 總覽",
+    value: summaryParts.join("  |  "),
+  })
+
+  mainEmbed.setFooter({
+    text: `⏱ ${(totalDurationMs / 1000).toFixed(0)}s`,
+  })
+
+  embeds.push(mainEmbed)
   return { embeds }
 }

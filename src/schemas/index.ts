@@ -79,6 +79,7 @@ export const finalJudgmentSchema = z.object({
   disagreementLevel: disagreementLevelSchema,
   dataQualityWarning: z.array(z.string()),
   entryPrice: z.number().positive().optional(),
+  targetPrice: z.number().positive().optional(),
   stopLoss: z.number().positive().optional(),
   positionSizePercent: z.number().min(0).max(100).optional(),
   invalidationConditions: z.array(z.string()).max(5),

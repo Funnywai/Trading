@@ -9,6 +9,9 @@ import {
 import { debateCommand, handleDebate, handleDebateFromButton } from "./commands/debate"
 import { portfolioCommand, handlePortfolio } from "./commands/portfolio"
 import { searchCommand, handleSearch } from "./commands/search"
+import { pnlCommand, handlePnl } from "./commands/pnl"
+import { reviewCommand, handleReview } from "./commands/review"
+import { helpCommand, handleHelp } from "./commands/help"
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID
@@ -27,6 +30,9 @@ const commands = [
   debateCommand.toJSON(),
   portfolioCommand.toJSON(),
   searchCommand.toJSON(),
+  pnlCommand.toJSON(),
+  reviewCommand.toJSON(),
+  helpCommand.toJSON(),
 ]
 
 // Register slash commands on startup
@@ -59,6 +65,12 @@ client.on("interactionCreate", async (interaction) => {
     await handlePortfolio(interaction)
   } else if (interaction.commandName === "search") {
     await handleSearch(interaction)
+  } else if (interaction.commandName === "pl") {
+    await handlePnl(interaction)
+  } else if (interaction.commandName === "review") {
+    await handleReview(interaction)
+  } else if (interaction.commandName === "help") {
+    await handleHelp(interaction)
   }
 })
 

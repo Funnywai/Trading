@@ -40,6 +40,7 @@ action 必須是以下之一：
 - disagreementLevel: "LOW" | "MEDIUM" | "HIGH"（代理人分歧程度）
 - dataQualityWarning: 資料品質警告列表（如 stale_fundamentals、limited_news 等）
 - entryPrice: 建議入場價（僅 ADD_SMALL）
+- targetPrice: 建議止盈價（僅 ADD_SMALL，需 Technical Agent 有支撐位判斷才填，不可憑空猜測）
 - stopLoss: 建議止損價（僅 ADD_SMALL / REDUCE）
 - positionSizePercent: 建議佔組合百分比（僅 ADD_SMALL，需遵從風險評估限制）
 - invalidationConditions: 判斷錯誤的條件列表（什麼情況下應推翻此決策，最多 5 點繁體中文）
@@ -97,8 +98,9 @@ ADD_SMALL 是「小注試倉」，不是「全面確認後才進場」。
 - 如果只有 1 類證據支持某 action → downgrade 該 action 到 HOLD/OBSERVE
 
 ## 價格與 timing 欄位規則
-- entryPrice / stopLoss 只有在 Technical Agent 提供了具體 entryZone 或 stopLogic 時才能填寫
-- 如果 Technical Agent setupQuality < 40 或 Technical Agent 缺席 → entryPrice/stopLoss 必須留空
+- entryPrice / targetPrice / stopLoss 只有在 Technical Agent 提供了具體 entryZone、targetZone 或 stopLogic 時才能填寫
+- 如果 Technical Agent setupQuality < 40 或 Technical Agent 缺席 → entryPrice/targetPrice/stopLoss 必須留空
+- targetPrice 必須 > entryPrice（risk/reward 至少 1:1 以上），不可是任意猜測值
 - positionSizePercent 不能超過 Risk Agent 的 maxPositionSize 對應的百分比
 
 ## 保守決策規則

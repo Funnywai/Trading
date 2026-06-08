@@ -24,6 +24,7 @@ export class DeepseekAdapter implements ILLMAdapter {
     const body: Record<string, unknown> = {
       model,
       messages,
+      temperature: options?.temperature ?? 0.3,
     }
 
     if (isPro) {
@@ -50,14 +51,19 @@ export class DeepseekAdapter implements ILLMAdapter {
 
     if (!response.ok) {
       let errorMessage = `Deepseek API returned status ${response.status}`
+      let errorDetail = ""
       try {
         const errorBody = await response.json() as any
         if (errorBody.error?.message) {
           errorMessage = errorBody.error.message as string
         }
+        errorDetail = JSON.stringify(errorBody)
       } catch {
         errorMessage = response.statusText || errorMessage
       }
+      console.error(`[DeepSeek API Error] HTTP ${response.status} — ${errorMessage}`)
+      if (errorDetail) console.error(`[DeepSeek API Error] Body: ${errorDetail}`)
+      console.error(`[DeepSeek API Error] Request model: ${model}, message count: ${messages.length}`)
       throw new Error(`Deepseek API error: ${errorMessage}`)
     }
 
