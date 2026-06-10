@@ -1,5 +1,7 @@
 # Trading AI — Multi-Agent Debate System
 
+**Version:** 1.1.0
+
 美股多代理人辯論分析系統。使用 Deepseek API + LangGraph，由 12 個專業 Agent 組成完整 trading desk 工作流。
 
 ## 快速開始
