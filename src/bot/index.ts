@@ -5,7 +5,9 @@ import {
   GatewayIntentBits,
   REST,
   Routes,
+  TextChannel,
 } from "discord.js"
+import cron from "node-cron"
 import { debateCommand, handleDebate, handleDebateFromButton } from "./commands/debate"
 import { portfolioCommand, handlePortfolio } from "./commands/portfolio"
 import { searchCommand, handleSearch } from "./commands/search"
@@ -13,6 +15,7 @@ import { pnlCommand, handlePnl } from "./commands/pnl"
 import { reviewCommand, handleReview } from "./commands/review"
 import { helpCommand, handleHelp } from "./commands/help"
 import { buyCommand, handleBuy, sellCommand, handleSell } from "./commands/trade"
+import { scanMarket } from "@/application/search-service"
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID
@@ -83,6 +86,38 @@ client.on("interactionCreate", async (interaction) => {
 
 client.once("ready", () => {
   console.log(`Bot ready — logged in as ${client.user?.tag}`)
+
+  const scanChannelId = process.env.MORNING_SCAN_CHANNEL_ID
+  const scanCronExpression = process.env.MORNING_SCAN_CRON ?? "30 8 * * 1-5"
+  const scanTimezone = process.env.MORNING_SCAN_TIMEZONE ?? "America/New_York"
+
+  if (scanChannelId) {
+    cron.schedule(scanCronExpression, async () => {
+      console.log("⏰ Morning scan triggered")
+      try {
+        const channel = await client.channels.fetch(scanChannelId)
+        if (!channel || !("send" in channel)) {
+          console.error("MORNING_SCAN_CHANNEL_ID is not a valid text channel")
+          return
+        }
+
+        const textChannel = channel as TextChannel
+        const msg = await textChannel.send("🔍 晨間掃描啟動中...")
+
+        const result = await scanMarket(async (message) => {
+          await msg.edit(message).catch(() => {})
+        })
+
+        await msg.edit({ content: null, embeds: result.embeds, components: result.components })
+        console.log("Morning scan completed")
+      } catch (err) {
+        console.error("Morning scan failed:", err)
+      }
+    }, {
+      timezone: scanTimezone,
+    })
+    console.log(`Morning scan cron registered (${scanCronExpression}, ${scanTimezone})`)
+  }
 })
 
 client.login(TOKEN)

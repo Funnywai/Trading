@@ -342,6 +342,35 @@ Hermes 的 gateway 支援 Telegram、Slack、WhatsApp、Signal 等，啟用後�
 
 ---
 
+## 補充：交叉比對後發現的缺口
+
+| 缺口 | 嚴重度 | 說明 |
+|------|--------|------|
+| API request/response Zod schemas 未定義 | 🔴 高 | `schemas/index.ts` 只有 Agent schema，Phase 2 endpoint 的 input/output 需新增定義 |
+| `resolveTradePrice()` 未納入 service 藍圖 | 🟡 中 | `trade.ts` 買賣前會自動抓 Yahoo 即時報價補 `price`，此邏輯需內建在 `trade-service.ts` |
+| `parseHoldings()` 重複存在兩處 | 🟡 中 | `debate.ts:27` 和 `portfolio.ts:29` 有相同的 holdings 字串解析函數，抽 service 時應合併到 `src/lib/` |
+| API error response 格式未定義 | 🟡 中 | Phase 2 需定義統一格式 `{ success: false, error: { code, message } }` |
+| `.env` 新增變數未列舉 | 🟡 中 | Phase 2 需 `API_PORT`、`API_KEY`；Phase 4 需 `MORNING_SCAN_CHANNEL_ID` |
+| MCP vs Shell Wrapper 未決策 | 🔴 高 | 建議 Shell Wrapper MVP 先上，MCP 後續升級 |
+| `"all"` share 語意處理 | 🟢 低 | `/sell shares:all` 解析存在於 Discord handler，API 層需明確規範 |
+
+---
+
+## 前置工作：Plan B 晨間掃描 Cron（✅ 已完成）
+
+> 在 Hermes Phase 1-4 完成前，先在 TypeScript 端用 `node-cron` 實作每天早上自動執行 `/search` 並輸出到 Discord 指定頻道。
+
+**已建檔案：**
+- `src/application/search-service.ts` — 從 `bot/commands/search.ts` 抽出核心邏輯（`scanMarket(onProgress)` pure function）
+- `src/application/index.ts` — barrel export
+- `src/bot/commands/search.ts` — 改為薄包裝，呼叫 `scanMarket()`
+- `src/bot/index.ts` — `client.once("ready")` 時註冊 cron job（`30 8 * * 1-5`）
+- `.env` — 新增 `MORNING_SCAN_CHANNEL_ID`
+
+> 此實作正好也是 Hermes Phase 1 的 `search-service.ts` 第一步，未來掛上 Express endpoint 即可，零浪費。
+
+---
+
 ## 不碰的部分（硬護欄）
 
 | 模組 | 原因 |
