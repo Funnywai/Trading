@@ -151,6 +151,7 @@ export interface FinalJudgment {
   disagreementLevel: DisagreementLevel
   dataQualityWarning: string[]
   entryPrice?: number
+  targetPrice?: number
   stopLoss?: number
   positionSizePercent?: number
   invalidationConditions: string[]

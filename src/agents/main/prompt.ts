@@ -39,8 +39,9 @@ action 必須是以下之一：
 - evidenceStrength: "WEAK" | "MODERATE" | "STRONG"
 - disagreementLevel: "LOW" | "MEDIUM" | "HIGH"（代理人分歧程度）
 - dataQualityWarning: 資料品質警告列表（如 stale_fundamentals、limited_news 等）
-- entryPrice: 建議入場價（僅 ADD_SMALL）
-- stopLoss: 建議止損價（僅 ADD_SMALL / REDUCE）
+- entryPrice: 建議入場價（僅 ADD_SMALL 時填寫）
+- targetPrice: 建議止盈價（ADD_SMALL / HOLD / REDUCE 必填，基於技術面壓力位判斷，不可留空）
+- stopLoss: 建議止損價（ADD_SMALL / HOLD / REDUCE 必填，基於技術面支撐位判斷，不可留空）
 - positionSizePercent: 建議佔組合百分比（僅 ADD_SMALL，需遵從風險評估限制）
 - invalidationConditions: 判斷錯誤的條件列表（什麼情況下應推翻此決策，最多 5 點繁體中文）
 - nextReviewTrigger: 建議下次檢視時機（例如「下週財報後」、「一個月後」等，繁體中文）
@@ -97,9 +98,12 @@ ADD_SMALL 是「小注試倉」，不是「全面確認後才進場」。
 - 如果只有 1 類證據支持某 action → downgrade 該 action 到 HOLD/OBSERVE
 
 ## 價格與 timing 欄位規則
-- entryPrice / stopLoss 只有在 Technical Agent 提供了具體 entryZone 或 stopLogic 時才能填寫
-- 如果 Technical Agent setupQuality < 40 或 Technical Agent 缺席 → entryPrice/stopLoss 必須留空
-- positionSizePercent 不能超過 Risk Agent 的 maxPositionSize 對應的百分比
+- entryPrice：僅 ADD_SMALL 時填寫。ADD_SMALL 時必須填寫，不可留空
+- targetPrice / stopLoss：ADD_SMALL / HOLD / REDUCE 時必須填寫，不可留空
+- HOLD 時的 targetPrice/stopLoss 應基於技術面壓力位/支撐位（如近期高點、均線壓制、布林帶上沿等）
+- REDUCE 時的 stopLoss 應基於技術面支撐位，targetPrice 可基於合理估值上限
+- 即使 Technical Agent 未提供精確數字，也應根據分析結論給出合理估計值
+- positionSizePercent 不能超過 Risk Agent 的 maxPositionSize 對應的百分比（僅 ADD_SMALL）
 
 ## 保守決策規則
 - evidenceStrength = WEAK 或 disagreementLevel = HIGH → 只能在 {OBSERVE, HOLD, NO_ACTION} 中選擇

@@ -12,7 +12,7 @@
 | 持久化 | Prisma + SQLite (`prisma/dev.db`) |
 | 測試框架 | Vitest v4 |
 | 執行器 | `tsx` |
-| 測試 | 157 tests / 19 files |
+| 測試 | 122 tests / 13 files（13 既有 enforcement 測試失敗） |
 | 語言輸出 | 繁體中文（所有 Agent prompt 鎖定繁體中文輸出） |
 
 ## 目錄結構
@@ -21,7 +21,7 @@
 Trading/
 ├── .env                          # DEEPSEEK_API_KEY, FINNHUB_API_KEY, DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID
 ├── prisma/
-│   └── schema.prisma             # Portfolio, Holding, TradeRecord, RunHistory, AlertLog
+│   └── schema.prisma             # Portfolio (totalCapital + cashBalance), Holding, ClosedTrade, TradeRecord, RunHistory, AlertLog
 │
 └── src/
     ├── types/index.ts            # 所有共享 TS 型別
@@ -45,7 +45,7 @@ Trading/
     │   │   └── yahoo-finance.ts  # Yahoo Finance: quote + history + fundamentals
     │   ├── news/
     │   │   ├── interface.ts      # INewsAdapter
-    │   │   └── finnhub.ts        # Finnhub API (/company-news, 10 articles)
+    │   │   └── finnhub.ts        # Finnhub API (/company-news, 20 articles, 7 days)
     │   └── fundamental/
     │       ├── interface.ts      # IFundamentalAdapter
     │       └── fmp.ts            # FMP adapter (備用，目前 Yahoo 為主力)
@@ -128,11 +128,16 @@ Trading/
     │       └── orchestrator.ts   # LangGraph StateGraph: 13 nodes + 8 routers (621 lines)
     │
     ├── bot/
-    │   ├── index.ts              # Discord Bot 入口 (client, REST, interaction routing)
+    │   ├── index.ts              # Discord Bot 入口 (client, REST, slash + button interaction routing)
     │   ├── formatter.ts          # formatProgressEmbed(), formatResultEmbed()
     │   └── commands/
-    │       ├── debate.ts         # /debate slash command handler + debate.ts slash command builder
-    │       └── portfolio.ts      # /portfolio show + /portfolio set slash commands
+    │       ├── debate.ts         # debateCore() shared + handleDebate() + handleDebateFromButton()
+    │       ├── portfolio.ts      # /portfolio show + /portfolio set slash commands
+    │       ├── pnl.ts            # /pl — 總資產、現金、已/未實現損益、勝率
+    │       ├── trade.ts          # /buy + /sell — 買入/賣出股票，自動記錄持倉
+    │       ├── search.ts         # /search news scanner + LLM scoring (30 stocks, 6 results)
+    │       ├── review.ts         # /review — 對所有持倉逐一辯論分析
+    │       └── help.ts           # /help — 指令說明
     │
     └── __tests__/
         └── integration.test.ts   # Debate pipeline 整合測試
@@ -189,13 +194,15 @@ interface DebateResult {
 
 ```prisma
 model Portfolio {
-  id            String   @id @default(cuid())
-  discordUserId String   @unique
+  id            String        @id @default(cuid())
+  discordUserId String        @unique
   name          String
-  cashBalance   Float    @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  totalCapital  Float         @default(0)   // 初始投入總本金（固定不變）
+  cashBalance   Float         @default(0)   // 實際現金餘額（隨買賣增減）
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   holdings      Holding[]
+  closedTrades  ClosedTrade[]
 }
 
 model Holding {
@@ -206,6 +213,19 @@ model Holding {
   averageCost Float
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+}
+
+model ClosedTrade {
+  id          String    @id @default(cuid())
+  portfolioId String
+  ticker      String
+  side        String              // "BUY" | "SELL"
+  shares      Float
+  price       Float               // 成交價
+  totalValue  Float               // shares * price
+  realizedPnl Float?              // 僅 SELL 有值，計算已實現損益
+  createdAt   DateTime  @default(now())
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 
@@ -261,7 +281,7 @@ START
 ┌──────────────────────────────────────────────────┐
 │ 1. fetchData                                     │
 │    Yahoo.getQuote + getHistoricalPrices          │
-│    Finnhub.getNews(10)                           │
+│    Finnhub.getNews(20)                           │
 │    Yahoo.getFundamentalData (quoteSummary)       │
 │    Yahoo.getMacroData (SPY, VIX, TLT, SHY ETFs)  │
 │    → output: priceBars, news[], fundamentals,    │
@@ -454,16 +474,22 @@ START
 |------|------|
 | `/debate <ticker>` | 啟動 13 節點多智能體分析 |
 | `/debate <ticker> capital:100000 holdings:AAPL:50:180,...` | 手動指定 portfolio（覆蓋 DB） |
+| `/search` | 掃描 30 檔重點股的新聞與報價，LLM 評分後回傳 Top 6 |
+| `/search` → 點擊 `🚀 TICKER` 按鈕 | 直接啟動該標的完整辯論分析（含進度 + 結果 embed） |
+| `/buy <ticker> <shares> [price]` | 買入股票，新增至投資組合（price 選填，留空自動抓即時股價） |
+| `/sell <ticker> <shares|all> [price]` | 賣出股票，從投資組合移除（shares=all 全賣），顯示已實現損益 |
+| `/pl` | 顯示總資產、初始本金、現金餘額、已/未實現損益、勝率 |
 | `/portfolio set capital:100000 holdings:AAPL:50:180,MSFT:30:350` | 儲存 portfolio 到 Prisma |
 | `/portfolio set capital:100000` | 儲存純現金 portfolio（無持倉） |
 | `/portfolio set capital:100000 holdings:-` | 同上，`-` 代表無持倉 |
-| `/portfolio show` | 顯示已儲存的 portfolio |
+| `/portfolio show` | 顯示總本金、現金餘額、持倉成本 |
 
 ### 流程
 
 1. 首次: `/portfolio set capital:100000 holdings:AAPL:50:180`
 2. 以後每次: `/debate AAPL` → 自動從 DB 讀取你的 portfolio → Risk Agent 啟用
 3. 若 `/debate` 時同時提供 `capital` + `holdings` 參數 → 以參數為準（覆蓋 DB）
+4. 掃描機會: `/search` → LLM 評分後點擊 `🚀 TICKER` 按鈕 → 直接啟動完整辯論分析（portfolio 僅從 DB 讀取）
 
 ### 進度顯示
 
@@ -471,6 +497,15 @@ START
 - 保留最近 **15 行**進度記錄
 - 分析結束後先 flush 最後進度，再顯示最終結果 embed
 - 若 embed 內容過長導致 Discord 拒絕 → **fallback 純文字**顯示
+
+### /search 流程
+
+1. 並行抓取 30 檔掃描清單（`SCAN_UNIVERSE`）的報價 + 新聞（每檔限 3 篇）
+2. 排除 0 新聞或抓取失敗的標的
+3. 將剩餘標的以精簡格式送 LLM 評分（`temperature: 0.3, responseSchema: {}`）
+4. LLM 回傳 JSON：`[{ ticker, score, rationale }]`，按分數降冪
+5. 合併價格資料後顯示 Top 6 結果 embed
+6. 每個結果附 `🚀 TICKER` 按鈕（Primary style），點擊後直接觸發 `debateCore()` 啟動完整辯論流程（含進度更新 + 結果 embed）
 
 ### Bot 啟動
 
@@ -543,7 +578,7 @@ npm run test:watch               # vitest watch mode
 | 檢查 | 結果 |
 |------|------|
 | TypeScript | 0 錯誤 |
-| Tests | 157 passed / 19 files |
+| Tests | 122 tests / 13 files（13 既有 enforcement 測試失敗） |
 | Dependencies | 363 packages (精簡後，261 個已移除) |
 
 ## Key Decisions
@@ -554,7 +589,7 @@ npm run test:watch               # vitest watch mode
 - **Size caps over action bans** — enforcement rules use position size constraints instead of hard OBSERVE blocks
 - **Yahoo for fundamentals** — replaced FMP entirely (402/403 on free plan)
 - **Discord Bot as separate process** — `tsx` runner, shares agent engine code, no HTTP hop
-- **Portfolio in Prisma** — Discord User ID as key, no localStorage or JSON file
+- **Portfolio in Prisma** — `totalCapital` 固定不變，`cashBalance` 為實際現金，`ClosedTrade` 記錄每次買賣與已實現損益，支援 Win Rate 計算
 - **All agents use v4-flash** — 一致性與成本控制
 
 ## Known Limitations
@@ -564,3 +599,4 @@ npm run test:watch               # vitest watch mode
 3. **concentration.ts sector map** — only 18 tickers hardcoded
 4. **optimization.ts + backtest.ts** — experimental, not connected to main workflow
 5. **No real-time price alerts** — only intra-run alert generation
+6. **Button debate: portfolio from DB only** — 從 `/search` 按鈕觸發時無法自訂 `capital` / `holdings` 參數

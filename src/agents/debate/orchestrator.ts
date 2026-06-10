@@ -5,11 +5,10 @@ import { INewsAdapter } from "@/adapters/news/interface"
 import { IFundamentalAdapter } from "@/adapters/fundamental/interface"
 import { IMarketDataAdapter } from "@/adapters/market-data/interface"
 
-import { runMainThesis } from "@/agents/main/runner"
+import { runMainThesis, runMainJudgment } from "@/agents/main/runner"
 import { runBullResearcher } from "@/agents/bull-researcher/runner"
 import { runBearResearcher } from "@/agents/bear-researcher/runner"
 import { runResearchManager } from "@/agents/research-manager/runner"
-import { runTrader } from "@/agents/trader/runner"
 import { runRiskAgent } from "@/agents/risk/runner"
 import { runVerifierAgent } from "@/agents/verifier/runner"
 import { runAnalystPass } from "@/agents/analyst-pass/runner"
@@ -146,7 +145,7 @@ export function buildDebateGraph(
     const [quote, priceBars, news, fundamentals, macroSpy, macroQqq, macroVix, macroTnx, macroDxy, macroOil] = await Promise.all([
       marketData.getQuote(state.ticker),
       marketData.getHistoricalPrices(state.ticker, "1d", "1y").catch((e) => { console.error(e); return [] as PriceBar[] }),
-      newsAdapter.getNews(state.ticker, 10).catch((e) => { newsError = String(e instanceof Error ? e.message : e); console.error(e); return [] as NewsArticle[] }),
+      newsAdapter.getNews(state.ticker, 20).catch((e) => { newsError = String(e instanceof Error ? e.message : e); console.error(e); return [] as NewsArticle[] }),
       fundamentalAdapter.getFundamentalData(state.ticker).catch((e) => { fundamentalsError = String(e instanceof Error ? e.message : e); console.error(e); return null }),
       marketData.getQuote("SPY").catch(() => null),
       marketData.getQuote("QQQ").catch(() => null),
@@ -376,57 +375,53 @@ export function buildDebateGraph(
     return { riskAssessment: null }
   }
 
-  // === NODE: trader ===
-  async function traderNode(state: DebateState): Promise<Partial<DebateState>> {
-    if (!state.researchMemo || !state.thesis) {
-      const fallback: TradeProposal = { ticker: state.ticker, side: "NONE", action: "OBSERVE", timeHorizon: "N/A", sizingRationale: "No research memo available — conservative fallback", expectedCatalysts: [], invalidationConditions: [], thesisId: state.ticker }
-      return { tradeProposal: fallback }
-    }
+  // === NODE: mainJudgment ===
+  async function mainJudgmentNode(state: DebateState): Promise<Partial<DebateState>> {
+    if (!state.thesis) return { error: "No thesis" }
     const t0 = Date.now()
-    emit({ phase: "judgment", detail: "Trader generating proposal...", node: "trader", status: "running" })
+    emit({ phase: "judgment", detail: "Main-Judgment 評估中...", node: "mainJudgment", status: "running" })
+
+    const debateArgs: AgentArgument[] = [state.prevBullArgs, state.prevBearArgs].filter((a): a is AgentArgument => a !== null)
+    const allRounds = [
+      { round: 1, arguments: state.analystReports },
+      ...(debateArgs.length > 0 ? [{ round: 2, arguments: debateArgs }] : []),
+    ]
+
     const holdsTicker = state.hasPortfolio && state.portfolioHoldings.some((h) => h.ticker === state.ticker)
-    const riskObj = state.riskAssessment ? { maxPositionSize: state.riskAssessment.maxPositionSize, riskScore: state.riskAssessment.riskScore, warnings: state.riskAssessment.warnings } : null
-    const result = await runTrader(llm, { ticker: state.ticker, thesis: state.thesis, researchMemo: state.researchMemo, riskAssessment: riskObj, holdsThisTicker: holdsTicker }).catch(() => null)
+
+    const result = await runMainJudgment(llm, {
+      ticker: state.ticker,
+      currentPrice: state.currentPrice,
+      thesis: state.thesis,
+      rounds: allRounds,
+      riskAssessment: state.riskAssessment,
+      verifierReport: state.verifierReport,
+      holdsThisTicker: holdsTicker,
+    }).catch(() => null)
+
     if (result && typeof result === "object" && "success" in result && (result as { success: boolean }).success && (result as { data: unknown }).data) {
-      const proposal = (result as { data: TradeProposal }).data
-      emit({ phase: "judgment", detail: `Trade Proposal: ${proposal.side} ${proposal.action}`, node: "trader", status: "done", durationMs: Date.now() - t0 })
-      return { tradeProposal: proposal, totalTokensUsed: state.totalTokensUsed + (result as { tokensUsed: number }).tokensUsed }
+      const judgment = (result as { data: FinalJudgment }).data
+      emit({ phase: "judgment", detail: `Main-Judgment: ${judgment.action} (conviction ${(judgment.conviction * 100).toFixed(0)}%)`, node: "mainJudgment", status: "done", durationMs: Date.now() - t0 })
+      return { judgment, totalTokensUsed: state.totalTokensUsed + (result as { tokensUsed: number }).tokensUsed }
     }
-    // Trader failed — produce conservative fallback proposal
-    const fallback: TradeProposal = {
-      ticker: state.ticker, side: "NONE", action: "OBSERVE", timeHorizon: "N/A",
-      sizingRationale: "Trader agent failed to produce valid output — conservative fallback",
-      expectedCatalysts: [], invalidationConditions: [], thesisId: state.ticker,
+
+    const fallback: FinalJudgment = {
+      ticker: state.ticker, action: "OBSERVE", conviction: 0.1,
+      rationale: "Main-Judgment LLM 呼叫失敗，採用保守決策：不動作。",
+      debateSummary: "分析流程因 LLM 錯誤而中止", bullSummary: [], bearSummary: [],
+      keyEvidenceIds: [], evidenceStrength: "WEAK", disagreementLevel: "LOW",
+      dataQualityWarning: result && typeof result === "object" && "error" in result ? [`main-judgment_failed: ${(result as { error: string }).error}`] : [],
+      invalidationConditions: [], nextReviewTrigger: "修復 LLM 後重新評估",
     }
-    emit({ phase: "judgment", detail: `Trade Proposal: FALLBACK → OBSERVE (trader failed)`, node: "trader", status: "done", durationMs: Date.now() - t0 })
-    return { tradeProposal: fallback }
+    emit({ phase: "judgment", detail: `Main-Judgment: FALLBACK → OBSERVE (failed)`, node: "mainJudgment", status: "done", durationMs: Date.now() - t0 })
+    return { judgment: fallback, totalTokensUsed: state.totalTokensUsed + (result && typeof result === "object" && "tokensUsed" in result ? (result as { tokensUsed: number }).tokensUsed : 0) }
   }
 
   // === NODE: approve ===
   async function approveNode(state: DebateState): Promise<Partial<DebateState>> {
-    if (!state.tradeProposal) return { error: "No trade proposal" }
-    const proposal = state.tradeProposal
+    const judgment = state.judgment
+    if (!judgment) return { error: "No judgment" }
     const holdsTicker = state.hasPortfolio && state.portfolioHoldings.some((h) => h.ticker === state.ticker)
-
-    // Map TradeProposal to FinalJudgment for enforcement
-    const judgment: FinalJudgment = {
-      ticker: proposal.ticker,
-      action: proposal.action,
-      conviction: state.researchMemo?.conviction ?? 0.5,
-      rationale: proposal.sizingRationale,
-      debateSummary: state.researchMemo?.summary ?? "",
-      bullSummary: state.researchMemo?.bullCase ?? [],
-      bearSummary: state.researchMemo?.bearCase ?? [],
-      keyEvidenceIds: [],
-      evidenceStrength: state.researchMemo?.conviction != null && state.researchMemo.conviction >= 0.7 ? "STRONG" : state.researchMemo?.conviction != null && state.researchMemo.conviction >= 0.4 ? "MODERATE" : "WEAK",
-      disagreementLevel: "LOW",
-      dataQualityWarning: [],
-      entryPrice: proposal.entryBand?.lower,
-      stopLoss: proposal.stopLoss,
-      positionSizePercent: proposal.maxPositionSizePct,
-      invalidationConditions: proposal.invalidationConditions,
-      nextReviewTrigger: state.researchMemo?.nextReviewTrigger ?? "1 month",
-    }
 
     const resolvedHoldings = state.hasPortfolio ? state.portfolioHoldings.map((h) => {
       const p = h.currentPrice ?? state.currentPrice
@@ -439,26 +434,71 @@ export function buildDebateGraph(
       riskAssessment: state.riskAssessment, concentration, holdsTicker,
     })
 
-    const rejected = enforced.action !== proposal.action || enforced.action === "OBSERVE" || enforced.action === "NO_ACTION"
-    const resized = enforced.positionSizePercent !== undefined && proposal.maxPositionSizePct !== undefined && enforced.positionSizePercent < proposal.maxPositionSizePct
+    const enforcedByPolicy = enforced.action !== judgment.action
+    const isObserveOrNoAction = enforced.action === "OBSERVE" || enforced.action === "NO_ACTION"
+    const rejected = enforcedByPolicy || isObserveOrNoAction
+    const resized = enforced.positionSizePercent != null && judgment.positionSizePercent != null && enforced.positionSizePercent < judgment.positionSizePercent
+
+    let rejectionReasons: string[] = []
+
+    if (rejected) {
+      if (enforcedByPolicy) {
+        rejectionReasons = enforced.dataQualityWarning
+          .filter((w: string) => w.startsWith("enforce:"))
+          .map((w: string) => w.replace(/^enforce:\s*/, ""))
+      } else {
+        const reasons: string[] = []
+
+        if (judgment.evidenceStrength === "WEAK") {
+          reasons.push("證據力不足（WEAK），不滿足進場條件")
+        } else if (judgment.evidenceStrength === "MODERATE") {
+          reasons.push("證據力中等（MODERATE），需更多確認信號")
+        }
+
+        if (judgment.disagreementLevel === "HIGH") {
+          reasons.push("多空分歧過大（HIGH），限制行動至觀察")
+        } else if (judgment.disagreementLevel === "MEDIUM") {
+          reasons.push("多空分歧中等（MEDIUM），暫不適合進場")
+        }
+
+        if (state.verifierReport && !state.verifierReport.canProceedToFinal) {
+          reasons.push(`驗證代理人否決（證據覆蓋=${state.verifierReport.evidenceCoverageScore}）`)
+        }
+
+        if (state.riskAssessment && state.riskAssessment.riskScore >= 60) {
+          reasons.push(`風險評分偏高（riskScore=${state.riskAssessment.riskScore}），不滿足進場條件`)
+        }
+
+        for (const w of judgment.dataQualityWarning) {
+          if (!w.startsWith("enforce:")) {
+            if (w === "stale_fundamentals") reasons.push("基本面資料過時")
+            else if (w === "limited_news") reasons.push("新聞資料有限")
+            else if (w === "near_earnings") reasons.push("接近財報發布，不確定性高")
+            else if (w === "insufficient_data") reasons.push("整體資料不足")
+            else reasons.push(w)
+          }
+        }
+
+        rejectionReasons = reasons
+      }
+    }
 
     const approval: ApprovalDecision = {
       action: rejected ? "REJECTED" : resized ? "RESIZED" : "APPROVED",
       approvedBy: "policy-engine",
-      originalSize: proposal.maxPositionSizePct,
+      originalSize: judgment.positionSizePercent ?? undefined,
       adjustedSize: resized ? enforced.positionSizePercent : undefined,
-      rejectionReasons: rejected ? enforced.dataQualityWarning.filter((w: string) => w.startsWith("enforce:")) : [],
+      rejectionReasons,
       overrideReasons: [],
       approvedAt: new Date().toISOString(),
     }
 
     if (rejected || resized) {
-      emit({ phase: "judgment", detail: `Policy Engine: ${approval.action} (${proposal.action} → ${enforced.action})`, node: "approve", status: "done" })
+      emit({ phase: "judgment", detail: `Policy Engine: ${approval.action} (${judgment.action} → ${enforced.action})`, node: "approve", status: "done" })
     } else {
       emit({ phase: "judgment", detail: `Policy Engine: APPROVED`, node: "approve", status: "done" })
     }
 
-    // Generate alerts
     const alerts = generateAlerts({
       riskAssessment: state.riskAssessment,
       dataQuality: state.dataQuality,
@@ -473,11 +513,24 @@ export function buildDebateGraph(
 
   // === NODE: executionSim ===
   async function executionSimNode(state: DebateState): Promise<Partial<DebateState>> {
-    if (!state.tradeProposal) return { executionResult: null }
+    const judgment = state.judgment
+    if (!judgment) return { executionResult: null }
+
+    const side: "LONG" | "SHORT" | "NONE" = judgment.action === "ADD_SMALL" ? "LONG"
+      : judgment.action === "REDUCE" || judgment.action === "EXIT" ? "SHORT"
+      : "NONE"
+
+    if (side === "NONE") return { executionResult: null }
+
+    const entryPrice = judgment.entryPrice ?? state.currentPrice
+    const entryBand: { lower: number; upper: number } | undefined = entryPrice
+      ? { lower: entryPrice * 0.99, upper: entryPrice * 1.01 }
+      : undefined
+
     const t0 = Date.now()
     emit({ phase: "judgment", detail: "Running execution simulation...", node: "executionSim", status: "running" })
     const result = simulateExecution({
-      proposal: { side: state.tradeProposal.side, entryBand: state.tradeProposal.entryBand, maxPositionSizePct: state.tradeProposal.maxPositionSizePct },
+      proposal: { side, entryBand, maxPositionSizePct: judgment.positionSizePercent },
       currentPrice: state.currentPrice, priceBars: state.priceBars,
       portfolioTotalValue: state.hasPortfolio ? state.portfolioTotalValue : 10000,
     })
@@ -519,11 +572,14 @@ export function buildDebateGraph(
     if (s.error) return "conservativeFinal"
     if (s.dataQuality.qualityScore < 30) return "conservativeFinal"
     if (s.verifierReport?.canProceedToFinal === false) return "conservativeFinal"
-    return s.hasPortfolio ? "computeRiskMetrics" : "trader"
+    return s.hasPortfolio ? "computeRiskMetrics" : "mainJudgment"
   }
   function afterRiskRouter(s: DebateState): string { return s.error ? "conservativeFinal" : "assessRisk" }
-  function afterAssessRouter(s: DebateState): string { return "trader" }
-  function afterTraderRouter(s: DebateState): string { return s.error && !s.tradeProposal ? "conservativeFinal" : "approve" }
+  function afterAssessRouter(s: DebateState): string { return "mainJudgment" }
+  function afterMainJudgmentRouter(s: DebateState): string {
+    if (s.error) return "conservativeFinal"
+    return "approve"
+  }
 
   // --- Build Graph ---
   const graph = new StateGraph(DebateAnnotation)
@@ -535,7 +591,7 @@ export function buildDebateGraph(
     .addNode("verifierCheck", verifierCheckNode)
     .addNode("computeRiskMetrics", computeRiskMetricsNode)
     .addNode("assessRisk", riskAssessmentNode)
-    .addNode("trader", traderNode)
+    .addNode("mainJudgment", mainJudgmentNode)
     .addNode("approve", approveNode)
     .addNode("executionSim", executionSimNode)
     .addNode("conservativeFinal", conservativeFinalNode)
@@ -546,10 +602,10 @@ export function buildDebateGraph(
     .addConditionalEdges("analystPass", afterAnalystRouter, { bullBearDebate: "bullBearDebate", conservativeFinal: "conservativeFinal" })
     .addConditionalEdges("bullBearDebate", afterBullBearRouter, { bullBearDebate: "bullBearDebate", researchManager: "researchManager", conservativeFinal: "conservativeFinal" })
     .addConditionalEdges("researchManager", afterResearchRouter, { verifierCheck: "verifierCheck", conservativeFinal: "conservativeFinal" })
-    .addConditionalEdges("verifierCheck", afterVerifierRouter, { computeRiskMetrics: "computeRiskMetrics", trader: "trader", conservativeFinal: "conservativeFinal" })
+    .addConditionalEdges("verifierCheck", afterVerifierRouter, { computeRiskMetrics: "computeRiskMetrics", mainJudgment: "mainJudgment", conservativeFinal: "conservativeFinal" })
     .addConditionalEdges("computeRiskMetrics", afterRiskRouter, { assessRisk: "assessRisk", conservativeFinal: "conservativeFinal" })
-    .addConditionalEdges("assessRisk", afterAssessRouter, { trader: "trader" })
-    .addConditionalEdges("trader", afterTraderRouter, { approve: "approve", conservativeFinal: "conservativeFinal" })
+    .addConditionalEdges("assessRisk", afterAssessRouter, { mainJudgment: "mainJudgment" })
+    .addConditionalEdges("mainJudgment", afterMainJudgmentRouter, { approve: "approve", conservativeFinal: "conservativeFinal" })
     .addEdge("approve", "executionSim")
     .addEdge("executionSim", END)
     .addEdge("conservativeFinal", END)

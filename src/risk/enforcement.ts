@@ -14,7 +14,7 @@ export function enforceDecisionPolicy(params: {
 
   let action = judgment.action
   let conviction = judgment.conviction
-  let positionSizePercent = judgment.positionSizePercent
+  let positionSizePercent = judgment.positionSizePercent ?? undefined
   const warnings = [...judgment.dataQualityWarning]
   let downgraded = action !== judgment.action
 
@@ -22,7 +22,7 @@ export function enforceDecisionPolicy(params: {
   if (!holdsTicker && ["HOLD", "REDUCE", "EXIT"].includes(judgment.action)) {
     action = "OBSERVE"
     conviction = Math.min(conviction, 0.3)
-    warnings.push(`enforce: action_requires_holding (${judgment.action}→OBSERVE, holdsTicker=false)`)
+    warnings.push(`enforce: 未持有此股票，${judgment.action} 不適用，已改為觀察`)
     downgraded = true
   }
 
@@ -30,7 +30,7 @@ export function enforceDecisionPolicy(params: {
   if (!downgraded && holdsTicker && judgment.action === "OBSERVE") {
     action = "HOLD"
     conviction = Math.min(conviction, 0.5)
-    warnings.push("enforce: holder_should_not_observe (OBSERVE→HOLD, holdsTicker=true)")
+    warnings.push("enforce: 已持有此股票，不應僅觀察，已改為持有")
     downgraded = true
   }
 
@@ -38,7 +38,7 @@ export function enforceDecisionPolicy(params: {
   if (!downgraded && dataQuality.qualityScore < 40) {
     action = "OBSERVE"
     conviction = Math.min(conviction, 0.15)
-    warnings.push(`enforce: data_quality_too_low (score=${dataQuality.qualityScore})`)
+    warnings.push(`enforce: 資料品質不足（品質分數=${dataQuality.qualityScore}），強制觀察`)
     downgraded = true
   }
 
@@ -46,7 +46,7 @@ export function enforceDecisionPolicy(params: {
   if (!downgraded && verifierReport?.canProceedToFinal === false) {
     action = "OBSERVE"
     conviction = Math.min(conviction, 0.15)
-    warnings.push(`enforce: verifier_blocked (coverage=${verifierReport.evidenceCoverageScore})`)
+    warnings.push(`enforce: 驗證代理人否決（證據覆蓋=${verifierReport.evidenceCoverageScore}），強制觀察`)
     downgraded = true
   }
 
@@ -55,13 +55,13 @@ export function enforceDecisionPolicy(params: {
     if (verifierReport.evidenceCoverageScore < 25) {
       action = "OBSERVE"
       conviction = Math.min(conviction, 0.2)
-      warnings.push(`enforce: evidence_coverage_too_low (coverage=${verifierReport.evidenceCoverageScore})`)
+      warnings.push(`enforce: 證據覆蓋率過低（coverage=${verifierReport.evidenceCoverageScore}），強制觀察`)
       downgraded = true
     } else if (verifierReport.evidenceCoverageScore < 40 && action === "ADD_SMALL") {
       const cap = 2
       if (positionSizePercent === undefined || positionSizePercent > cap) {
         positionSizePercent = cap
-        warnings.push(`enforce: low_coverage_capped_to_${cap}pct (coverage=${verifierReport.evidenceCoverageScore})`)
+        warnings.push(`enforce: 證據覆蓋率偏低（coverage=${verifierReport.evidenceCoverageScore}），倉位上限調至 ${cap}%`)
       }
     }
   }
@@ -71,7 +71,7 @@ export function enforceDecisionPolicy(params: {
     const cap = 2
     if (positionSizePercent === undefined || positionSizePercent > cap) {
       positionSizePercent = cap
-      warnings.push(`enforce: weak_evidence_capped_to_${cap}pct`)
+      warnings.push(`enforce: 證據力不足，倉位上限調至 ${cap}%`)
     }
   }
 
@@ -80,22 +80,28 @@ export function enforceDecisionPolicy(params: {
     if (riskAssessment.riskScore >= 75) {
       action = "HOLD"
       conviction = conviction * 0.5
-      warnings.push(`enforce: high_risk_blocks_add_small (riskScore=${riskAssessment.riskScore})`)
+      warnings.push(`enforce: 風險評分過高（riskScore=${riskAssessment.riskScore}），禁止增持`)
       downgraded = true
     } else if (riskAssessment.riskScore >= 60) {
       const cap = 3
       if (positionSizePercent === undefined || positionSizePercent > cap) {
         positionSizePercent = cap
-        warnings.push(`enforce: elevated_risk_capped_to_${cap}pct (riskScore=${riskAssessment.riskScore})`)
+        warnings.push(`enforce: 風險偏高（riskScore=${riskAssessment.riskScore}），倉位上限調至 ${cap}%`)
       }
     }
   }
 
-  // Rule 6: concentration score < 50 + ADD_SMALL → HOLD
+  // Rule 6: concentration score < 50 + ADD_SMALL → HOLD (holder) / OBSERVE (non-holder)
   if (!downgraded && concentration && concentration.overallConcentrationScore < 50 && action === "ADD_SMALL") {
-    action = "HOLD"
-    conviction = conviction * 0.6
-    warnings.push(`enforce: high_concentration_blocks_add_small (concScore=${concentration.overallConcentrationScore})`)
+    if (holdsTicker) {
+      action = "HOLD"
+      conviction = conviction * 0.6
+      warnings.push(`enforce: 組合集中度過高（concScore=${concentration.overallConcentrationScore}），禁止增持，改為持有`)
+    } else {
+      action = "OBSERVE"
+      conviction = Math.min(conviction, 0.3)
+      warnings.push(`enforce: 組合集中度過高（concScore=${concentration.overallConcentrationScore}），禁止開新倉位，改為觀察`)
+    }
     downgraded = true
   }
 
@@ -104,7 +110,7 @@ export function enforceDecisionPolicy(params: {
     const cap = 2
     if (positionSizePercent === undefined || positionSizePercent > cap) {
       positionSizePercent = cap
-      warnings.push(`enforce: high_disagreement_capped_to_${cap}pct`)
+      warnings.push(`enforce: 代理人分歧過大，倉位上限調至 ${cap}%`)
     }
   }
 
@@ -113,7 +119,7 @@ export function enforceDecisionPolicy(params: {
     const capped = Math.min(positionSizePercent, 5)
     if (capped < positionSizePercent) {
       positionSizePercent = capped
-      warnings.push(`enforce: concentrated_portfolio_caps_position_at_5pct (was ${judgment.positionSizePercent}%)`)
+      warnings.push(`enforce: 單一持股過度集中，倉位上限調至 5%（原建議 ${judgment.positionSizePercent}%）`)
     }
   }
 
@@ -121,7 +127,7 @@ export function enforceDecisionPolicy(params: {
   if (!downgraded && judgment.disagreementLevel === "HIGH" && action === "REDUCE") {
     action = "HOLD"
     conviction = conviction * 0.6
-    warnings.push("enforce: high_disagreement_downgrades_reduce_to_hold")
+    warnings.push("enforce: 代理人分歧過大，減持降級為持有")
     downgraded = true
   }
 
@@ -129,7 +135,7 @@ export function enforceDecisionPolicy(params: {
   if (!downgraded && riskAssessment && riskAssessment.riskScore > 85) {
     action = "OBSERVE"
     conviction = Math.min(conviction, 0.1)
-    warnings.push(`enforce: extreme_risk_forces_observe (riskScore=${riskAssessment.riskScore})`)
+    warnings.push(`enforce: 極端風險（riskScore=${riskAssessment.riskScore}），強制觀察`)
     downgraded = true
   }
 

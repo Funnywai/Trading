@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -8,13 +9,15 @@ datasource db {
 }
 
 model Portfolio {
-  id            String   @id @default(cuid())
-  discordUserId String   @unique
+  id            String        @id @default(cuid())
+  discordUserId String        @unique
   name          String
-  cashBalance   Float    @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  totalCapital  Float         @default(0)
+  cashBalance   Float         @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   holdings      Holding[]
+  closedTrades  ClosedTrade[]
 }
 
 model Holding {
@@ -25,6 +28,19 @@ model Holding {
   averageCost Float
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+}
+
+model ClosedTrade {
+  id          String    @id @default(cuid())
+  portfolioId String
+  ticker      String
+  side        String
+  shares      Float
+  price       Float
+  totalValue  Float
+  realizedPnl Float?
+  createdAt   DateTime  @default(now())
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 

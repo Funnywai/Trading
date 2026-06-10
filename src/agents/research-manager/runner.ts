@@ -3,6 +3,7 @@ import { runAgent } from "@/lib/agent-runner"
 import { ResearchManagerInput, ResearchManagerOutput, researchManagerInputSchema, researchManagerOutputSchema } from "./schema"
 import { RESEARCH_MANAGER_PROMPT } from "./prompt"
 import { AgentRunResult } from "@/types"
+import { DEEPSEEK_V4_PRO_MODEL } from "@/lib/constants"
 
 export async function runResearchManager(
   llm: ILLMAdapter, input: ResearchManagerInput
@@ -10,5 +11,6 @@ export async function runResearchManager(
   return runAgent<ResearchManagerOutput>(llm, {
     systemPrompt: RESEARCH_MANAGER_PROMPT, inputSchema: researchManagerInputSchema,
     outputSchema: researchManagerOutputSchema, input, agentName: "Research-Manager", temperature: 0.3,
+    model: DEEPSEEK_V4_PRO_MODEL,
   })
 }
