@@ -104,7 +104,7 @@ describe("enforceDecisionPolicy", () => {
       })
       expect(result.action).toBe("OBSERVE")
       expect(result.conviction).toBeLessThanOrEqual(0.15)
-      expect(result.dataQualityWarning.some((w) => w.includes("data_quality_too_low"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("資料品質不足"))).toBe(true)
     })
 
     it("does not downgrade when qualityScore = 50", () => {
@@ -129,7 +129,7 @@ describe("enforceDecisionPolicy", () => {
         concentration: null,
       })
       expect(result.action).toBe("OBSERVE")
-      expect(result.dataQualityWarning.some((w) => w.includes("verifier_blocked"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("驗證代理人否決"))).toBe(true)
     })
 
     it("forces OBSERVE when evidenceCoverageScore < 25", () => {
@@ -141,7 +141,7 @@ describe("enforceDecisionPolicy", () => {
         concentration: null,
       })
       expect(result.action).toBe("OBSERVE")
-      expect(result.dataQualityWarning.some((w) => w.includes("evidence_coverage_too_low"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("證據覆蓋率過低"))).toBe(true)
     })
 
     it("caps position size instead of banning when coverage 25-40", () => {
@@ -154,7 +154,7 @@ describe("enforceDecisionPolicy", () => {
       })
       expect(result.action).toBe("ADD_SMALL")
       expect(result.positionSizePercent).toBe(2)
-      expect(result.dataQualityWarning.some((w) => w.includes("capped_to_2pct"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("證據覆蓋率偏低"))).toBe(true)
     })
   })
 
@@ -169,7 +169,7 @@ describe("enforceDecisionPolicy", () => {
       })
       expect(result.action).toBe("ADD_SMALL")
       expect(result.positionSizePercent).toBe(2)
-      expect(result.dataQualityWarning.some((w) => w.includes("weak_evidence_capped"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("證據力不足"))).toBe(true)
     })
   })
 
@@ -196,7 +196,7 @@ describe("enforceDecisionPolicy", () => {
       })
       expect(result.action).toBe("ADD_SMALL")
       expect(result.positionSizePercent).toBe(3)
-      expect(result.dataQualityWarning.some((w) => w.includes("elevated_risk_capped"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("風險偏高"))).toBe(true)
     })
 
     it("forces OBSERVE when riskScore > 85", () => {
@@ -208,7 +208,7 @@ describe("enforceDecisionPolicy", () => {
         concentration: null,
       })
       expect(result.action).toBe("OBSERVE")
-      expect(result.dataQualityWarning.some((w) => w.includes("extreme_risk"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("極端風險"))).toBe(true)
     })
   })
 
@@ -222,7 +222,7 @@ describe("enforceDecisionPolicy", () => {
         concentration: lowConcentration({ overallConcentrationScore: 35 }),
       })
       expect(result.action).toBe("HOLD")
-      expect(result.dataQualityWarning.some((w) => w.includes("high_concentration"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("組合集中度過高"))).toBe(true)
     })
 
     it("caps position size when portfolio is concentrated", () => {
@@ -236,7 +236,7 @@ describe("enforceDecisionPolicy", () => {
         }),
       })
       expect(result.positionSizePercent).toBe(5)
-      expect(result.dataQualityWarning.some((w) => w.includes("concentrated_portfolio_caps"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("單一持股過度集中"))).toBe(true)
     })
   })
 
@@ -251,7 +251,7 @@ describe("enforceDecisionPolicy", () => {
       })
       expect(result.action).toBe("ADD_SMALL")
       expect(result.positionSizePercent).toBe(2)
-      expect(result.dataQualityWarning.some((w) => w.includes("high_disagreement_capped"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("代理人分歧過大"))).toBe(true)
     })
   })
 
@@ -289,7 +289,7 @@ describe("enforceDecisionPolicy", () => {
         concentration: null,
       })
       expect(result.dataQualityWarning).toContain("existing_warning")
-      expect(result.dataQualityWarning.some((w) => w.includes("data_quality_too_low"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("資料品質不足"))).toBe(true)
     })
   })
 
@@ -304,7 +304,7 @@ describe("enforceDecisionPolicy", () => {
         holdsTicker: false,
       })
       expect(result.action).toBe("OBSERVE")
-      expect(result.dataQualityWarning.some((w) => w.includes("action_requires_holding"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("未持有此股票"))).toBe(true)
     })
 
     it("forces OBSERVE when non-holder outputs REDUCE", () => {
@@ -376,7 +376,7 @@ describe("enforceDecisionPolicy", () => {
         holdsTicker: true,
       })
       expect(result.action).toBe("HOLD")
-      expect(result.dataQualityWarning.some((w) => w.includes("holder_should_not_observe"))).toBe(true)
+      expect(result.dataQualityWarning.some((w) => w.includes("不應僅觀察"))).toBe(true)
     })
   })
 })

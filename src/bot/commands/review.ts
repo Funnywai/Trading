@@ -32,10 +32,10 @@ export async function handleReview(interaction: ChatInputCommandInteraction) {
 
   const holdings = portfolio.holdings
   const totalHoldingsValue = holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
-  const cashRatio = portfolio.capital > 0 ? (portfolio.capital - totalHoldingsValue) / portfolio.capital : 0.2
+  const cashRatio = portfolio.totalCapital > 0 ? portfolio.cashBalance / portfolio.totalCapital : 0.2
 
   const fullPortfolio = {
-    totalValue: portfolio.capital,
+    totalValue: portfolio.totalCapital,
     holdings: holdings.map((h) => ({ ticker: h.ticker, shares: h.shares, averageCost: h.averageCost })),
     cashRatio,
   }
@@ -93,7 +93,7 @@ export async function handleReview(interaction: ChatInputCommandInteraction) {
 
       const positionSizePercent = result.judgment.positionSizePercent
       const suggestedShares = positionSizePercent !== undefined && result.judgment.entryPrice !== undefined && result.judgment.entryPrice > 0
-        ? Math.floor(portfolio.capital * (positionSizePercent / 100) / result.judgment.entryPrice)
+        ? Math.floor(portfolio.totalCapital * (positionSizePercent / 100) / result.judgment.entryPrice)
         : undefined
 
       results.push({

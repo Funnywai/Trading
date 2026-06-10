@@ -24,11 +24,19 @@ export async function handleHelp(interaction: ChatInputCommandInteraction) {
       },
       {
         name: "/pl",
-        value: "顯示你投資組合的總損益與各標的報酬率\n（查詢即時股價計算未實現損益）",
+        value: "顯示你投資組合的總損益與各標的報酬率\n含勝率、已實現 / 未實現損益、總資產",
+      },
+      {
+        name: "/buy <ticker> <shares> [price]",
+        value: "買入股票，加入你的投資組合\n`price` 選填，留空自動以即時股價成交\n範例：`/buy ticker:AAPL shares:10` 或 `/buy ticker:AAPL shares:10 price:185`",
+      },
+      {
+        name: "/sell <ticker> <shares> [price]",
+        value: "賣出股票，從投資組合移除\n`shares` 可填數字或 `all`（全賣）\n`price` 選填，留空自動以即時股價成交\n範例：`/sell ticker:AAPL shares:5` 或 `/sell ticker:AAPL shares:all`",
       },
       {
         name: "/portfolio show",
-        value: "顯示你已儲存的投資組合（持倉 + 現金）",
+        value: "顯示你已儲存的投資組合（持倉 + 現金 + 總本金）",
       },
       {
         name: "/portfolio set <capital> [holdings]",

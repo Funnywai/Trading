@@ -53,15 +53,14 @@ export async function handlePortfolio(interaction: ChatInputCommandInteraction) 
     }
 
     const holdingsValue = portfolio.holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
-    const cash = portfolio.capital - holdingsValue
 
     const embed = new EmbedBuilder()
       .setTitle(`Portfolio — ${interaction.user.displayName}`)
       .setColor(0x3b82f6)
       .addFields(
-        { name: "Total Capital", value: `$${portfolio.capital.toLocaleString()}`, inline: true },
-        { name: "Holdings Value", value: `$${holdingsValue.toLocaleString()}`, inline: true },
-        { name: "Cash", value: `$${cash.toLocaleString()} (${((cash / portfolio.capital) * 100).toFixed(0)}%)`, inline: true }
+        { name: "總本金", value: `$${portfolio.totalCapital.toLocaleString()}`, inline: true },
+        { name: "現金餘額", value: `$${portfolio.cashBalance.toLocaleString()}`, inline: true },
+        { name: "持倉成本", value: `$${holdingsValue.toLocaleString()}`, inline: true }
       )
 
     if (portfolio.holdings.length > 0) {

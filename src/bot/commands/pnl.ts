@@ -3,7 +3,7 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from "discord.js"
-import { getUserPortfolio } from "@/db/portfolio-repo"
+import { getUserPortfolio, getRealizedPnl, getWinRate } from "@/db/portfolio-repo"
 import { YahooFinanceAdapter } from "@/adapters/market-data/yahoo-finance"
 
 export const pnlCommand = new SlashCommandBuilder()
@@ -34,7 +34,7 @@ export async function handlePnl(interaction: ChatInputCommandInteraction) {
 
   if (portfolio.holdings.length === 0) {
     await interaction.editReply({
-      content: `你的投資組合僅有現金 $${portfolio.capital.toLocaleString()}，無持倉損益。`,
+      content: `你的投資組合僅有現金 $${portfolio.cashBalance.toLocaleString()}，無持倉損益。`,
     })
     return
   }
@@ -84,12 +84,14 @@ export async function handlePnl(interaction: ChatInputCommandInteraction) {
   holdingsPnl.sort((a, b) => b.pnl - a.pnl)
 
   const totalMarketValue = holdingsPnl.reduce((sum, h) => sum + h.marketValue, 0)
-  const totalPnl = holdingsPnl.reduce((sum, h) => sum + h.pnl, 0)
+  const unrealizedPnl = holdingsPnl.reduce((sum, h) => sum + h.pnl, 0)
   const holdingsCost = portfolio.holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
-  const cash = portfolio.capital - holdingsCost
-  const totalValue = totalMarketValue + cash
+  const realizedPnl = await getRealizedPnl(interaction.user.id)
+  const winRate = await getWinRate(interaction.user.id)
 
-  const totalPnlPct = holdingsCost > 0 ? (totalPnl / holdingsCost) * 100 : 0
+  const totalValue = totalMarketValue + portfolio.cashBalance
+  const totalPnl = realizedPnl + unrealizedPnl
+  const totalPnlPct = portfolio.totalCapital > 0 ? (totalPnl / portfolio.totalCapital) * 100 : 0
   const emoji = totalPnl >= 0 ? "🟢" : "🔴"
   const sign = totalPnl >= 0 ? "+" : ""
 
@@ -104,17 +106,27 @@ export async function handlePnl(interaction: ChatInputCommandInteraction) {
       },
       {
         name: "初始本金",
-        value: `$${portfolio.capital.toLocaleString()}`,
+        value: `$${portfolio.totalCapital.toLocaleString()}`,
         inline: true,
       },
       {
         name: "現金餘額",
-        value: `$${cash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        value: `$${portfolio.cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         inline: true,
       },
       {
         name: "持倉價值",
         value: `$${totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        inline: true,
+      },
+      {
+        name: "已實現損益",
+        value: `${realizedPnl >= 0 ? "+" : ""}$${realizedPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        inline: true,
+      },
+      {
+        name: "未實現損益",
+        value: `${sign}$${Math.abs(unrealizedPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
         inline: true,
       },
       {
@@ -125,6 +137,11 @@ export async function handlePnl(interaction: ChatInputCommandInteraction) {
       {
         name: "總報酬率",
         value: `${sign}${totalPnlPct.toFixed(2)}%`,
+        inline: true,
+      },
+      {
+        name: "勝率",
+        value: `${(winRate.winRate * 100).toFixed(1)}% (${winRate.wins}W / ${winRate.losses}L)`,
         inline: true,
       },
     )

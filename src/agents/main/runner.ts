@@ -12,6 +12,7 @@ import {
 } from "./schema"
 import { MAIN_THESIS_PROMPT, MAIN_JUDGMENT_PROMPT } from "./prompt"
 import { AgentRunResult } from "@/types"
+import { DEEPSEEK_V4_PRO_MODEL } from "@/lib/constants"
 
 export async function runMainThesis(
   llm: ILLMAdapter,
@@ -38,5 +39,6 @@ export async function runMainJudgment(
     input,
     agentName: "Main-Judgment",
     temperature: 0.3,
+    model: DEEPSEEK_V4_PRO_MODEL,
   })
 }

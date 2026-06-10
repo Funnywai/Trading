@@ -169,17 +169,34 @@ export function formatReviewResultEmbed(
       parts.push(`證據力: ${r.evidenceStrength}`)
 
       const priceParts: string[] = []
-      if (r.entryPrice) priceParts.push(`入場: $${r.entryPrice}`)
-      if (r.targetPrice) priceParts.push(`止盈: $${r.targetPrice}`)
-      if (r.stopLoss) priceParts.push(`止損: $${r.stopLoss}`)
-      if (r.positionSizePercent !== undefined && r.suggestedShares !== undefined && r.suggestedShares > 0) {
-        priceParts.push(`倉位: ${r.positionSizePercent}% ≈ ${r.suggestedShares} 股`)
+      const isAddSmall = r.action === "ADD_SMALL"
+      const hasPrice = r.currentPrice > 0
+
+      if (isAddSmall) {
+        if (r.entryPrice) priceParts.push(`入場: $${r.entryPrice}`)
+      }
+
+      if (r.targetPrice && hasPrice) {
+        const ratio = r.targetPrice / r.currentPrice
+        const costBased = r.averageCost * ratio
+        priceParts.push(`止盈: $${costBased.toFixed(2)}`)
+      }
+      if (r.stopLoss && hasPrice) {
+        const ratio = r.stopLoss / r.currentPrice
+        const costBased = r.averageCost * ratio
+        priceParts.push(`止損: $${costBased.toFixed(2)}`)
+      }
+
+      if (isAddSmall) {
+        if (r.positionSizePercent !== undefined && r.suggestedShares !== undefined && r.suggestedShares > 0) {
+          priceParts.push(`倉位: ${r.positionSizePercent}% ≈ ${r.suggestedShares} 股`)
+        }
       }
 
       const valueLines = [
         `**${r.action}** (${(r.conviction * 100).toFixed(0)}%)`,
         parts.join(" | "),
-        r.rationale.slice(0, 200),
+        r.rationale.slice(0, 300),
       ]
       if (priceParts.length > 0) valueLines.push(priceParts.join(" | "))
       if (r.riskScore !== null) valueLines.push(`Risk: ${r.riskScore}/100`)

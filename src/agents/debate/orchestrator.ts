@@ -434,15 +434,61 @@ export function buildDebateGraph(
       riskAssessment: state.riskAssessment, concentration, holdsTicker,
     })
 
-    const rejected = enforced.action !== judgment.action || enforced.action === "OBSERVE" || enforced.action === "NO_ACTION"
-    const resized = enforced.positionSizePercent !== undefined && judgment.positionSizePercent !== undefined && enforced.positionSizePercent < judgment.positionSizePercent
+    const enforcedByPolicy = enforced.action !== judgment.action
+    const isObserveOrNoAction = enforced.action === "OBSERVE" || enforced.action === "NO_ACTION"
+    const rejected = enforcedByPolicy || isObserveOrNoAction
+    const resized = enforced.positionSizePercent != null && judgment.positionSizePercent != null && enforced.positionSizePercent < judgment.positionSizePercent
+
+    let rejectionReasons: string[] = []
+
+    if (rejected) {
+      if (enforcedByPolicy) {
+        rejectionReasons = enforced.dataQualityWarning
+          .filter((w: string) => w.startsWith("enforce:"))
+          .map((w: string) => w.replace(/^enforce:\s*/, ""))
+      } else {
+        const reasons: string[] = []
+
+        if (judgment.evidenceStrength === "WEAK") {
+          reasons.push("證據力不足（WEAK），不滿足進場條件")
+        } else if (judgment.evidenceStrength === "MODERATE") {
+          reasons.push("證據力中等（MODERATE），需更多確認信號")
+        }
+
+        if (judgment.disagreementLevel === "HIGH") {
+          reasons.push("多空分歧過大（HIGH），限制行動至觀察")
+        } else if (judgment.disagreementLevel === "MEDIUM") {
+          reasons.push("多空分歧中等（MEDIUM），暫不適合進場")
+        }
+
+        if (state.verifierReport && !state.verifierReport.canProceedToFinal) {
+          reasons.push(`驗證代理人否決（證據覆蓋=${state.verifierReport.evidenceCoverageScore}）`)
+        }
+
+        if (state.riskAssessment && state.riskAssessment.riskScore >= 60) {
+          reasons.push(`風險評分偏高（riskScore=${state.riskAssessment.riskScore}），不滿足進場條件`)
+        }
+
+        for (const w of judgment.dataQualityWarning) {
+          if (!w.startsWith("enforce:")) {
+            if (w === "stale_fundamentals") reasons.push("基本面資料過時")
+            else if (w === "limited_news") reasons.push("新聞資料有限")
+            else if (w === "near_earnings") reasons.push("接近財報發布，不確定性高")
+            else if (w === "insufficient_data") reasons.push("整體資料不足")
+            else reasons.push(w)
+          }
+        }
+
+        rejectionReasons = reasons
+      }
+    }
 
     const approval: ApprovalDecision = {
       action: rejected ? "REJECTED" : resized ? "RESIZED" : "APPROVED",
       approvedBy: "policy-engine",
-      originalSize: judgment.positionSizePercent,
+      originalSize: judgment.positionSizePercent ?? undefined,
       adjustedSize: resized ? enforced.positionSizePercent : undefined,
-      rejectionReasons: rejected ? enforced.dataQualityWarning.filter((w: string) => w.startsWith("enforce:")) : [],
+      rejectionReasons,
       overrideReasons: [],
       approvedAt: new Date().toISOString(),
     }

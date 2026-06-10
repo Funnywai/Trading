@@ -67,9 +67,9 @@ async function debateCore(
       if (saved) {
         const totalHoldingsValue = saved.holdings.reduce((sum, h) => sum + h.shares * h.averageCost, 0)
         portfolio = {
-          totalValue: saved.capital,
+          totalValue: saved.totalCapital,
           holdings: saved.holdings,
-          cashRatio: saved.capital > 0 ? (saved.capital - totalHoldingsValue) / saved.capital : 0.2,
+          cashRatio: saved.totalCapital > 0 ? saved.cashBalance / saved.totalCapital : 0.2,
         }
       }
     }

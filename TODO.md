@@ -7,42 +7,52 @@
 ## 架構總覽
 
 ```
-                     ┌─────────────────────────────┐
-                     │     Hermes Agent (Python)    │
-                     │  ┌─────────┐  ┌──────────┐  │
- Telegram / Slack ───▶│  │ Gateway │  │  Cron    │  │
-                     │  └────┬────┘  └────┬─────┘  │
-                     │       │            │         │
-                     │  ┌────▼────────────▼─────┐  │
-                     │  │    Tool Registry      │  │
-                     │  │  (call HTTP / MCP)    │  │
-                     │  └──────────┬───────────┘  │
-                     └─────────────┼──────────────┘
-                                   │ HTTP localhost:3400
-                     ┌─────────────▼──────────────┐
-                     │   Trading Engine (TS)       │
-                     │  ┌──────────────────────┐   │
-                     │  │  Express API Server   │   │
-                     │  │  POST /debate/run     │   │
-                     │  │  GET  /portfolio/:uid │   │
-                     │  │  GET  /history/:uid   │   │
-                     │  │  POST /digest/:uid    │   │
-                     │  └──────────┬───────────┘   │
-                     │  ┌──────────▼───────────┐   │
-                     │  │  Application Services │   │
-                     │  │  debateService()      │   │
-                     │  │  portfolioService()   │   │
-                     │  │  historyService()     │   │
-                     │  │  digestService()      │   │
-                     │  └──────────┬───────────┘   │
-                     │  ┌──────────▼───────────┐   │
-                     │  │  Existing Core        │   │
-                     │  │  orchestrator.ts      │   │
-                     │  │  risk/*.ts             │   │
-                     │  │  db/portfolio-repo.ts  │   │
-                     │  │  agents/**/runner.ts   │   │
-                     │  └──────────────────────┘   │
-                     └─────────────────────────────┘
+                      ┌─────────────────────────────┐
+                      │     Hermes Agent (Python)    │
+                      │  ┌─────────┐  ┌──────────┐  │
+  Telegram / Slack ───▶│  │ Gateway │  │  Cron    │  │
+                      │  └────┬────┘  └────┬─────┘  │
+                      │       │            │         │
+                      │  ┌────▼────────────▼─────┐  │
+                      │  │    Tool Registry      │  │
+                      │  │  (call HTTP / MCP)    │  │
+                      │  └──────────┬───────────┘  │
+                      └─────────────┼──────────────┘
+                                    │ HTTP localhost:3400
+                      ┌─────────────▼──────────────┐
+                      │   Trading Engine (TS)       │
+                      │  ┌──────────────────────┐   │
+                      │  │  Express API Server   │   │
+                      │  │  POST /trade/buy      │   │
+                      │  │  POST /trade/sell     │   │
+                      │  │  GET  /pnl/:uid       │   │
+                      │  │  POST /review/:uid    │   │
+                      │  │  POST /debate/run     │   │
+                      │  │  GET  /portfolio/:uid │   │
+                      │  │  PUT  /portfolio/:uid │   │
+                      │  │  GET  /history/:uid   │   │
+                      │  │  POST /digest/:uid    │   │
+                      │  │  GET  /search/:uid    │   │
+                      │  └──────────┬───────────┘   │
+                      │  ┌──────────▼───────────┐   │
+                      │  │  Application Services │   │
+                      │  │  tradeService()       │   │
+                      │  │  pnlService()         │   │
+                      │  │  reviewService()      │   │
+                      │  │  debateService()      │   │
+                      │  │  portfolioService()   │   │
+                      │  │  historyService()     │   │
+                      │  │  digestService()      │   │
+                      │  │  searchService()      │   │
+                      │  └──────────┬───────────┘   │
+                      │  ┌──────────▼───────────┐   │
+                      │  │  Existing Core        │   │
+                      │  │  orchestrator.ts      │   │
+                      │  │  risk/*.ts             │   │
+                      │  │  db/portfolio-repo.ts  │   │
+                      │  │  agents/**/runner.ts   │   │
+                      │  └──────────────────────┘   │
+                      └─────────────────────────────┘
 ```
 
 ---
@@ -66,34 +76,60 @@
 
 ```prisma
 model Portfolio {
-  id          String    @id @default(cuid())
-  userId      String    @unique       // 原 discordUserId，rename
-  platform    String    @default("discord")  // 新增，預設 discord
-  name        String
-  cashBalance Float     @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  holdings    Holding[]
+  id            String        @id @default(cuid())
+  userId        String        @unique       // 原 discordUserId，rename
+  platform      String        @default("discord")  // 新增，預設 discord
+  name          String
+  totalCapital  Float         @default(0)   // 初始投入總本金（固定不變）
+  cashBalance   Float         @default(0)   // 實際現金餘額（隨買賣增減）
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  holdings      Holding[]
+  closedTrades  ClosedTrade[]
+}
+
+model ClosedTrade {
+  id          String   @id @default(cuid())
+  portfolioId String
+  ticker      String
+  side        String            // "BUY" | "SELL"
+  shares      Float
+  price       Float
+  totalValue  Float
+  realizedPnl Float?            // 僅 SELL 有值
+  createdAt   DateTime @default(now())
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 ```
 
 Migration: `ALTER TABLE Portfolio RENAME COLUMN discordUserId TO userId;`
+Migration: 新增 `totalCapital` 欄位；舊資料首次讀取時自動遷移（`totalCapital=0` 觸發）
 
 ### 新增檔案
 
 ```
 src/application/
-├── debate-service.ts      # runDebateForUser(ticker, userId, options?) → DebateResult
-├── portfolio-service.ts   # getPortfolioSummary(userId), updatePortfolio(userId, ...)
-├── history-service.ts     # getRecentRuns(userId, limit), getRunDetail(runId)
-├── digest-service.ts      # generateDailyDigest(userId) → DigestPayload
-├── search-service.ts      # scanMarket(userId) → ScanResult (from search.ts)
-└── index.ts               # barrel export
+├── trade-service.ts        # buyStock(userId, ticker, shares, price?), sellStock(userId, ticker, shares, price?)
+├── pnl-service.ts          # getPnlSummary(userId) → { totalAsset, cash, realizedPnl, unrealizedPnl, totalPnl, winRate, holdings[] }
+├── review-service.ts       # runPortfolioReview(userId) → ReviewReport（逐持倉 debate 結果）
+├── debate-service.ts       # runDebateForUser(ticker, userId, options?) → DebateResult
+├── portfolio-service.ts    # getPortfolioSummary(userId), setPortfolio(userId, capital, holdings?),
+│                           #   addHolding(userId, ticker, shares, price), removeHolding(userId, ticker, shares, price)
+├── history-service.ts      # getRecentRuns(userId, limit), getRunDetail(runId)
+├── digest-service.ts       # generateDailyDigest(userId) → DigestPayload
+├── search-service.ts       # scanMarket(userId) → ScanResult (from search.ts)
+└── index.ts                # barrel export
 ```
 
 ### 修改檔案
+
+- `src/bot/commands/trade.ts` — 改 call `tradeService().buyStock() / sellStock()`
+- `src/bot/commands/pnl.ts` — 改 call `pnlService().getPnlSummary()`
+- `src/bot/commands/review.ts` — 改 call `reviewService().runPortfolioReview()`
+- `src/bot/commands/portfolio.ts` — 改 call `portfolioService()`（含 trading operations）
 - `src/bot/commands/debate.ts` — 改 call `debateService()` 而非直接 `new DeepseekAdapter()` + `runDebate()`
-- `src/bot/commands/portfolio.ts` — 改 call `portfolioService()`
+- `src/bot/commands/search.ts` — 改 call `searchService()`
+- `src/bot/commands/help.ts` — 可從 service 層動態產生指令說明（選項，非必要）
 - `src/db/portfolio-repo.ts` — 所有 `discordUserId` 改為 `userId`
 
 ### 硬護欄：完全不碰
@@ -116,10 +152,14 @@ src/application/
 src/api/
 ├── server.ts              # Express app, listen on localhost:3400
 ├── routes/
+│   ├── trade.ts           # POST /api/trade/buy, POST /api/trade/sell
+│   ├── pnl.ts             # GET  /api/pnl/:userId
+│   ├── review.ts          # POST /api/review/:userId
 │   ├── debate.ts          # POST /api/debate/run
 │   ├── portfolio.ts       # GET/PUT /api/portfolio/:userId
 │   ├── history.ts         # GET /api/history/:userId?limit=10
-│   └── digest.ts          # POST /api/digest/:userId
+│   ├── digest.ts          # POST /api/digest/:userId
+│   └── search.ts          # GET /api/search/:userId
 ├── middleware/
 │   └── auth.ts            # API key middleware (X-API-Key header)
 └── index.ts               # 啟動入口
@@ -129,8 +169,12 @@ src/api/
 
 | Method | Endpoint | Request Body | Response |
 |--------|----------|-------------|----------|
+| `POST` | `/api/trade/buy` | `{ userId, ticker, shares, price? }` | `{ success, cashAfter, costBasis }` |
+| `POST` | `/api/trade/sell` | `{ userId, ticker, shares, price? }` | `{ success, realizedPnl, cashAfter }` |
+| `GET` | `/api/pnl/:userId` | - | `{ totalAsset, totalCapital, cash, realizedPnl, unrealizedPnl, totalPnl, winRate, holdings[] }` |
+| `POST` | `/api/review/:userId` | - | `ReviewReport`（逐持倉分析結果） |
 | `POST` | `/api/debate/run` | `{ userId, ticker, capital?, holdings? }` | `DebateResult` |
-| `GET` | `/api/portfolio/:userId` | - | `{ capital, holdings[], cashRatio }` |
+| `GET` | `/api/portfolio/:userId` | - | `{ totalCapital, cashBalance, holdings[] }` |
 | `PUT` | `/api/portfolio/:userId` | `{ capital, holdings[] }` | `{ success }` |
 | `GET` | `/api/history/:userId?limit=5` | - | `RunSummary[]` |
 | `POST` | `/api/digest/:userId` | - | `DigestPayload` |
@@ -168,10 +212,14 @@ src/integrations/hermes/
     └── mcp-server.test.ts
 ```
 
-### Tool Definitions (4-6 tools)
+### Tool Definitions (8-10 tools)
 
 | Tool Name | Description | Input |
 |-----------|-------------|-------|
+| `buy_stock` | 買入股票（扣現金、加倉、記錄交易） | `{ userId, ticker, shares, price? }` |
+| `sell_stock` | 賣出股票（加現金、減倉、記錄已實現損益） | `{ userId, ticker, shares, price? }` |
+| `get_pnl` | 查詢投資組合損益摘要（含勝率） | `{ userId }` |
+| `review_portfolio` | 對所有持倉逐一執行辯論分析 | `{ userId }` |
 | `run_debate` | 執行 13-node 多智能體辯論分析（含 verifier + risk + enforcement） | `{ userId, ticker }` |
 | `get_portfolio` | 查詢用戶投資組合摘要 | `{ userId }` |
 | `get_run_history` | 查詢最近辯論分析紀錄 | `{ userId, limit? }` |
@@ -184,6 +232,9 @@ src/integrations/hermes/
 ~/.hermes/skills/trading/
 ├── SKILL.md               # Skill 描述，告訴 Hermes 如何 call API
 └── scripts/
+    ├── buy_stock.sh       # curl -X POST http://localhost:3400/api/trade/buy ...
+    ├── sell_stock.sh      # curl -X POST http://localhost:3400/api/trade/sell ...
+    ├── get_pnl.sh         # curl http://localhost:3400/api/pnl/$1
     ├── run_debate.sh      # curl -X POST http://localhost:3400/api/debate/run ...
     ├── get_portfolio.sh   # curl http://localhost:3400/api/portfolio/$1
     └── get_digest.sh      # curl -X POST http://localhost:3400/api/digest/$1
@@ -199,13 +250,17 @@ src/integrations/hermes/
 ### 排程建議
 
 ```bash
-# 每天早上 8:30 生成持倉摘要
+# 每天早上 8:30 生成持倉摘要（含現金水位提醒）
 hermes cron create "30 8 * * 1-5" \
   "Call generate_daily_digest for the user, summarize in Chinese, and send to me."
 
+# 每週五 16:30 收盤後生成 P&L 週報（含勝率、已實現損益、最佳/最差標的）
+hermes cron create "30 16 * * 5" \
+  "Call get_pnl for the user, compare with last week's snapshot, highlight changes in win rate and top/bottom performers."
+
 # 每週一早上 9:00 做整週風險回顧
 hermes cron create "0 9 * * 1" \
-  "Call get_portfolio, check concentration risk, alert if high."
+  "Call get_portfolio, check concentration risk, alert if high. Also call get_pnl to flag any drawdown > 5%."
 
 # 每 4 小時掃描 watchlist（Phase 5 實作 watchlist 後）
 # hermes cron create "every 4h" "Call scan_market and report unusual activity."
@@ -233,6 +288,13 @@ interface UserContext {
     frequentlyBlockedByVerifier: boolean
     avgConviction: number
     mostCommonAction: string
+  }
+  stats: {
+    winRate: number
+    totalRealizedPnl: number
+    totalTrades: number
+    avgConviction: number
+    totalUnrealizedPnl: number
   }
   portfolioAge: number
 }

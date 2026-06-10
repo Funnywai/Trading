@@ -12,6 +12,7 @@ import { searchCommand, handleSearch } from "./commands/search"
 import { pnlCommand, handlePnl } from "./commands/pnl"
 import { reviewCommand, handleReview } from "./commands/review"
 import { helpCommand, handleHelp } from "./commands/help"
+import { buyCommand, handleBuy, sellCommand, handleSell } from "./commands/trade"
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID
@@ -33,6 +34,8 @@ const commands = [
   pnlCommand.toJSON(),
   reviewCommand.toJSON(),
   helpCommand.toJSON(),
+  buyCommand.toJSON(),
+  sellCommand.toJSON(),
 ]
 
 // Register slash commands on startup
@@ -71,6 +74,10 @@ client.on("interactionCreate", async (interaction) => {
     await handleReview(interaction)
   } else if (interaction.commandName === "help") {
     await handleHelp(interaction)
+  } else if (interaction.commandName === "buy") {
+    await handleBuy(interaction)
+  } else if (interaction.commandName === "sell") {
+    await handleSell(interaction)
   }
 })
 
