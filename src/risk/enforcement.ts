@@ -91,18 +91,25 @@ export function enforceDecisionPolicy(params: {
     }
   }
 
-  // Rule 6: concentration score < 50 + ADD_SMALL → HOLD (holder) / OBSERVE (non-holder)
+  // Rule 6: concentration score < 50 + ADD_SMALL → block (holder) / block if <30 (non-holder) / cap 2% if 30-50 (non-holder)
   if (!downgraded && concentration && concentration.overallConcentrationScore < 50 && action === "ADD_SMALL") {
     if (holdsTicker) {
       action = "HOLD"
       conviction = conviction * 0.6
       warnings.push(`enforce: 組合集中度過高（concScore=${concentration.overallConcentrationScore}），禁止增持，改為持有`)
-    } else {
+      downgraded = true
+    } else if (concentration.overallConcentrationScore < 30) {
       action = "OBSERVE"
       conviction = Math.min(conviction, 0.3)
-      warnings.push(`enforce: 組合集中度過高（concScore=${concentration.overallConcentrationScore}），禁止開新倉位，改為觀察`)
+      warnings.push(`enforce: 組合集中度極高（concScore=${concentration.overallConcentrationScore}），禁止開新倉位，改為觀察`)
+      downgraded = true
+    } else {
+      const cap = 2
+      if (positionSizePercent === undefined || positionSizePercent > cap) {
+        positionSizePercent = cap
+        warnings.push(`enforce: 組合集中度偏高（concScore=${concentration.overallConcentrationScore}），新倉位上限定為 ${cap}%`)
+      }
     }
-    downgraded = true
   }
 
   // Rule 7: disagreement HIGH + ADD_SMALL → cap 2% instead of ban

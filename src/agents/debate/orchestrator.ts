@@ -332,12 +332,15 @@ export function buildDebateGraph(
       const proceedMsg = vr.canProceedToFinal
         ? `canProceed=true`
         : `canProceed=false → ${vr.summary}`
+      console.log(`[DIAG] verifierCheckNode: ticker=${state.ticker} coverage=${vr.evidenceCoverageScore} counterEvidence=${vr.counterEvidenceCoverage} canProceedToFinal=${vr.canProceedToFinal}`)
       emit({ phase: "round", detail: `Verifier: coverage=${vr.evidenceCoverageScore}/100, c-counterEvidence=${vr.counterEvidenceCoverage}/100, ${proceedMsg}`, node: "verifierCheck", status: "done", durationMs: Date.now() - t0 })
       if (!vr.canProceedToFinal) {
+        console.log(`[DIAG] verifierCheckNode BLOCKED: ticker=${state.ticker} summary=${vr.summary}`)
         return { verifierReport: vr, error: `驗證代理人否決：${vr.summary} (coverage=${vr.evidenceCoverageScore}, counterEvidence=${vr.counterEvidenceCoverage})`, totalTokensUsed: state.totalTokensUsed + (result as { tokensUsed: number }).tokensUsed }
       }
       return { verifierReport: vr, totalTokensUsed: state.totalTokensUsed + (result as { tokensUsed: number }).tokensUsed }
     }
+    console.error(`[DIAG] verifierCheckNode LLM FAILED: ticker=${state.ticker} — using hardcoded canProceedToFinal=false fallback`)
     return { verifierReport: { unsupportedClaims: [], temporalMismatches: [], metricMismatches: [], duplicatedEvidenceIds: [], evidenceCoverageScore: 30, counterEvidenceCoverage: 50, canProceedToFinal: false, summary: "Verifier failed" } }
   }
 
@@ -389,6 +392,9 @@ export function buildDebateGraph(
 
     const holdsTicker = state.hasPortfolio && state.portfolioHoldings.some((h) => h.ticker === state.ticker)
 
+    const vr = state.verifierReport
+    console.log(`[DIAG] mainJudgmentNode entry: ticker=${state.ticker} holdsTicker=${holdsTicker} verifier.canProceedToFinal=${vr?.canProceedToFinal} verifier.coverage=${vr?.evidenceCoverageScore} verifier.counterEvidence=${vr?.counterEvidenceCoverage}`)
+
     const result = await runMainJudgment(llm, {
       ticker: state.ticker,
       currentPrice: state.currentPrice,
@@ -397,20 +403,27 @@ export function buildDebateGraph(
       riskAssessment: state.riskAssessment,
       verifierReport: state.verifierReport,
       holdsThisTicker: holdsTicker,
-    }).catch(() => null)
+    }).catch((err) => {
+      console.error(`[DIAG] mainJudgmentNode: runMainJudgment threw: ${err instanceof Error ? err.message : err}`)
+      return null
+    })
 
     if (result && typeof result === "object" && "success" in result && (result as { success: boolean }).success && (result as { data: unknown }).data) {
       const judgment = (result as { data: FinalJudgment }).data
+      console.log(`[DIAG] mainJudgmentNode SUCCESS: ticker=${state.ticker} action=${judgment.action} conviction=${judgment.conviction} evidenceStrength=${judgment.evidenceStrength} disagreement=${judgment.disagreementLevel}`)
       emit({ phase: "judgment", detail: `Main-Judgment: ${judgment.action} (conviction ${(judgment.conviction * 100).toFixed(0)}%)`, node: "mainJudgment", status: "done", durationMs: Date.now() - t0 })
       return { judgment, totalTokensUsed: state.totalTokensUsed + (result as { tokensUsed: number }).tokensUsed }
     }
+
+    const errorMsg = result && typeof result === "object" && "error" in result ? (result as { error: string }).error : "runMainJudgment returned null (likely threw)"
+    console.error(`[DIAG] mainJudgmentNode FAILED: ticker=${state.ticker} error=${errorMsg}`)
 
     const fallback: FinalJudgment = {
       ticker: state.ticker, action: "OBSERVE", conviction: 0.1,
       rationale: "Main-Judgment LLM 呼叫失敗，採用保守決策：不動作。",
       debateSummary: "分析流程因 LLM 錯誤而中止", bullSummary: [], bearSummary: [],
       keyEvidenceIds: [], evidenceStrength: "WEAK", disagreementLevel: "LOW",
-      dataQualityWarning: result && typeof result === "object" && "error" in result ? [`main-judgment_failed: ${(result as { error: string }).error}`] : [],
+      dataQualityWarning: [`main-judgment_failed: ${errorMsg}`],
       invalidationConditions: [], nextReviewTrigger: "修復 LLM 後重新評估",
     }
     emit({ phase: "judgment", detail: `Main-Judgment: FALLBACK → OBSERVE (failed)`, node: "mainJudgment", status: "done", durationMs: Date.now() - t0 })
@@ -433,6 +446,12 @@ export function buildDebateGraph(
       judgment, dataQuality: state.dataQuality, verifierReport: state.verifierReport,
       riskAssessment: state.riskAssessment, concentration, holdsTicker,
     })
+
+    if (enforced.action !== judgment.action) {
+      console.log(`[DIAG] approveNode ENFORCEMENT OVERRIDE: ${judgment.action} → ${enforced.action} warnings=${JSON.stringify(enforced.dataQualityWarning.filter(w => w.startsWith("enforce:")))}`)
+    } else {
+      console.log(`[DIAG] approveNode: action=${judgment.action} conviction=${judgment.conviction} qualityScore=${state.dataQuality.qualityScore} riskScore=${state.riskAssessment?.riskScore}`)
+    }
 
     const enforcedByPolicy = enforced.action !== judgment.action
     const isObserveOrNoAction = enforced.action === "OBSERVE" || enforced.action === "NO_ACTION"
